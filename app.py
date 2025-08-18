@@ -12,19 +12,21 @@ JIRA_API_TOKEN = os.getenv("ATLASSIAN_API_TOKEN")  # set in Render dashboard
 @app.route("/webhooks", methods=["POST"])
 def webhook():
     data = request.json
-    print("👉 Incoming webhook:", data, flush=True)
+    issue_key = data["issue"]["key"]
 
-    # Extract issue key correctly
-    issue_key = None
-    if "issue" in data:
-        issue_key = data["issue"].get("key")
+    # Who triggered it?
+    triggered_by = data.get("user", {}).get("emailAddress")
+    print("👉 Webhook by:", triggered_by)
 
-    if not issue_key:
-        return jsonify({"error": "No issue key found"}), 400
+    # Skip if it's your own Jira user
+    if triggered_by == JIRA_USER:
+        print("⏩ Skipping self-triggered event to avoid loop")
+        return jsonify({"status": "skipped"}), 200
 
-    # Call Jira back - Add a comment
+    # Proceed only for external triggers
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}/comment"
     auth = (JIRA_USER, JIRA_API_TOKEN)
+
     payload = {
         "body": {
             "type": "doc",
@@ -41,7 +43,7 @@ def webhook():
     }
 
     response = requests.post(url, json=payload, auth=auth)
-    print("👉 Jira response:", response.status_code, response.text, flush=True)
+    print("👉 Jira response:", response.status_code, response.text)
 
     return jsonify({"status": "ok"}), 200
 
