@@ -16,26 +16,23 @@ KEEPER_URL = "https://keeper-api-poc/receive-event"
 @app.route("/webhooks", methods=["POST"])
 def jira_webhook():
     data = request.json
-    print("👉 Raw Jira event:", data)
+    print("👉 Raw Jira Event:", data)
 
-    event_type = data.get("webhookEvent", "unknown")
-    triggered_by = data.get("user", {}).get("emailAddress", "unknown")
-
+    # Simplified payload for Keeper
     keeper_event = {
-        "event_type": event_type,
-        "triggered_by": triggered_by,
-        "issue_key": data.get("issue", {}).get("key"),
-        "summary": data.get("issue", {}).get("fields", {}).get("summary"),
-        "status": data.get("issue", {}).get("fields", {}).get("status", {}).get("name"),
+        "source": "jira",
+        "event_type": data.get("webhookEvent", "unknown"),
+        "data": data  # forward the full payload so nothing is lost
     }
 
-    # Send to Keeper
+    print("📤 Would send to Keeper:", keeper_event)
+
+    # (pretend sending to Keeper)
     try:
-        resp = requests.post(KEEPER_URL, json=keeper_event, timeout=5)
-        print("👉 Sent to Keeper:", keeper_event)
-        print("👉 Keeper response:", resp.status_code, resp.text)
+        response = requests.post(KEEPER_URL, json=keeper_event, timeout=5)
+        print("✅ Sent to Keeper:", response.status_code)
     except Exception as e:
-        print("❌ Keeper send failed:", str(e))
+        print("⚠️ Could not send to Keeper:", e)
 
     return jsonify({"status": "ok"}), 200
 
