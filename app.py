@@ -61,7 +61,7 @@ def keeper_webhook():
     auth = (JIRA_USER, JIRA_API_TOKEN)
 
     # Set correct Jira project key
-    project_key = "POC"  # Make sure this project exists in Jira
+    project_key = "SMS"  # Make sure this project exists in Jira
 
     # Build base payload with ADF description
     payload = {
