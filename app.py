@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import sys
 
 app = Flask(__name__)
 
@@ -15,24 +16,36 @@ KEEPER_URL = "https://keeper-api-poc/receive-event"
 ### JIRA → KEEPER
 @app.route("/webhooks", methods=["POST"])
 def jira_webhook():
-    data = request.json
-    print("👉 Raw Jira Event:", data)
+    data = request.json or {}
 
-    # Simplified payload for Keeper
+    # Safely extract relevant fields
+    issue = data.get("issue", {})
+    fields = issue.get("fields", {})
+    user = data.get("user", {})
+
+    event_type = request.headers.get("X-Atlassian-Webhook-Identifier", "unknown_event")
+    issue_key = issue.get("key")
+    summary = fields.get("summary")
+    status = fields.get("status", {}).get("name")
+    triggered_by = user.get("displayName") or user.get("emailAddress")
+
+    # Build a clean event payload for Keeper
     keeper_event = {
         "source": "jira",
-        "event_type": data.get("webhookEvent", "unknown"),
-        "data": data  # forward the full payload so nothing is lost
+        "event_type": event_type,
+        "issue_key": issue_key,
+        "summary": summary,
+        "status": status,
+        "triggered_by": triggered_by
     }
 
-    print("📤 Would send to Keeper:", keeper_event)
+    # Print only the relevant info
+    print("📢 Jira Event →", keeper_event)
+    sys.stdout.flush()
 
-    # (pretend sending to Keeper)
-    try:
-        response = requests.post(KEEPER_URL, json=keeper_event, timeout=5)
-        print("✅ Sent to Keeper:", response.status_code)
-    except Exception as e:
-        print("⚠️ Could not send to Keeper:", e)
+    # Simulate sending to Keeper
+    print("📤 Would send to Keeper:", keeper_event)
+    sys.stdout.flush()
 
     return jsonify({"status": "ok"}), 200
 
