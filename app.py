@@ -9,7 +9,7 @@ JIRA_URL = "https://metronlabs-team.atlassian.net"
 JIRA_USER = "purushottam.kamble@metronlabs.com"
 JIRA_API_TOKEN = os.getenv("ATLASSIAN_API_TOKEN")  # set in Render dashboard
 
-@app.route("/webhook", methods=["POST"])
+@app.route("/webhooks", methods=["POST"])
 def webhook():
     data = request.json
     print("👉 Incoming webhook:", data, flush=True)
