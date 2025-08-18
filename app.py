@@ -18,18 +18,17 @@ KEEPER_URL = "https://keeper-api-poc/receive-event"
 def jira_webhook():
     data = request.json or {}
 
-    # Safely extract relevant fields
+    # Extract relevant fields
     issue = data.get("issue", {})
     fields = issue.get("fields", {})
     user = data.get("user", {})
 
-    event_type = request.headers.get("X-Atlassian-Webhook-Identifier", "unknown_event")
+    event_type = data.get("webhookEvent", "unknown_event")   # FIXED
     issue_key = issue.get("key")
     summary = fields.get("summary")
     status = fields.get("status", {}).get("name")
     triggered_by = user.get("displayName") or user.get("emailAddress")
 
-    # Build a clean event payload for Keeper
     keeper_event = {
         "source": "jira",
         "event_type": event_type,
@@ -39,15 +38,13 @@ def jira_webhook():
         "triggered_by": triggered_by
     }
 
-    # Print only the relevant info
     print("📢 Jira Event →", keeper_event)
     sys.stdout.flush()
-
-    # Simulate sending to Keeper
     print("📤 Would send to Keeper:", keeper_event)
     sys.stdout.flush()
 
     return jsonify({"status": "ok"}), 200
+
 
 
 ### KEEPER → JIRA
