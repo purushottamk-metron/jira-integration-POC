@@ -52,6 +52,7 @@ def jira_webhook():
 def keeper_webhook():
     data = request.json
     print("👉 Raw Keeper event:", data)
+    sys.stdout.flush()
 
     event_type = data.get("event_type")
     user = data.get("user")
@@ -59,34 +60,43 @@ def keeper_webhook():
     headers = {"Content-Type": "application/json"}
     auth = (JIRA_USER, JIRA_API_TOKEN)
 
+    # Set correct Jira project key
+    project_key = "SMS"  # Make sure this project exists in Jira
+
+    payload = {
+        "fields": {
+            "project": {"key": project_key},
+            "summary": "",
+            "description": "",
+            "issuetype": {"name": "Task"}
+        }
+    }
+
     if event_type == "user_created":
-        payload = {
-            "fields": {
-                "project": {"key": "SMS"},  # change project key
-                "summary": f"New Keeper user created: {user}",
-                "description": f"A new user {user} was created in Keeper.",
-                "issuetype": {"name": "Task"}
-            }
-        }
-        resp = requests.post(f"{JIRA_URL}/rest/api/3/issue", json=payload, auth=auth, headers=headers)
-        print("👉 Jira create issue:", resp.status_code, resp.text)
-
+        payload["fields"]["summary"] = f"New Keeper user created: {user}"
+        payload["fields"]["description"] = f"A new user {user} was created in Keeper."
     elif event_type == "user_deleted":
-        # Example: create issue about deletion
-        payload = {
-            "fields": {
-                "project": {"key": "SMS"},
-                "summary": f"Keeper user deleted: {user}",
-                "description": f"User {user} was deleted in Keeper.",
-                "issuetype": {"name": "Task"}
-            }
-        }
-        resp = requests.post(f"{JIRA_URL}/rest/api/3/issue", json=payload, auth=auth, headers=headers)
-        print("👉 Jira create deletion issue:", resp.status_code, resp.text)
+        payload["fields"]["summary"] = f"Keeper user deleted: {user}"
+        payload["fields"]["description"] = f"User {user} was deleted in Keeper."
+    else:
+        print(f"⚠️ Unknown event_type: {event_type}")
+        sys.stdout.flush()
+        return jsonify({"status": "ignored"}), 200
 
-    # Other events (update, vault shared, etc.) → add more elif blocks
+    # Attempt to create Jira issue
+    try:
+        resp = requests.post(f"{JIRA_URL}/rest/api/3/issue", json=payload, auth=auth, headers=headers)
+        resp.raise_for_status()
+        print("✅ Jira issue created:", resp.json())
+    except requests.exceptions.HTTPError as e:
+        print("❌ Jira API HTTP error:", e)
+        print("Response:", resp.text)
+    except Exception as e:
+        print("❌ Unexpected error:", e)
+    sys.stdout.flush()
 
     return jsonify({"status": "ok"}), 200
+
 
 
 @app.route("/")
