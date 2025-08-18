@@ -62,7 +62,7 @@ def keeper_webhook():
     if event_type == "user_created":
         payload = {
             "fields": {
-                "project": {"key": "POC"},  # change project key
+                "project": {"key": "SMS"},  # change project key
                 "summary": f"New Keeper user created: {user}",
                 "description": f"A new user {user} was created in Keeper.",
                 "issuetype": {"name": "Task"}
