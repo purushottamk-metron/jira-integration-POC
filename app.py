@@ -75,7 +75,7 @@ def keeper_webhook():
         # Example: create issue about deletion
         payload = {
             "fields": {
-                "project": {"key": "POC"},
+                "project": {"key": "SMS"},
                 "summary": f"Keeper user deleted: {user}",
                 "description": f"User {user} was deleted in Keeper.",
                 "issuetype": {"name": "Task"}
