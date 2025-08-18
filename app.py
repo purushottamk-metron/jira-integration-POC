@@ -103,6 +103,21 @@ def keeper_webhook():
             ]
         }
 
+    elif event_type == "user_updated":
+        payload["fields"]["summary"] = f"Keeper user updated: {user}"
+        payload["fields"]["description"] = {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": f"User {user} was updated in Keeper. Please review the changes."}
+                    ]
+                }
+            ]
+        }
+
     else:
         print(f"⚠️ Unknown event_type: {event_type}")
         sys.stdout.flush()
