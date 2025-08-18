@@ -61,23 +61,48 @@ def keeper_webhook():
     auth = (JIRA_USER, JIRA_API_TOKEN)
 
     # Set correct Jira project key
-    project_key = "SMS"  # Make sure this project exists in Jira
+    project_key = "POC"  # Make sure this project exists in Jira
 
+    # Build base payload with ADF description
     payload = {
         "fields": {
             "project": {"key": project_key},
             "summary": "",
-            "description": "",
+            "description": {},
             "issuetype": {"name": "Task"}
         }
     }
 
     if event_type == "user_created":
         payload["fields"]["summary"] = f"New Keeper user created: {user}"
-        payload["fields"]["description"] = f"A new user {user} was created in Keeper."
+        payload["fields"]["description"] = {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": f"A new user {user} was created in Keeper."}
+                    ]
+                }
+            ]
+        }
+
     elif event_type == "user_deleted":
         payload["fields"]["summary"] = f"Keeper user deleted: {user}"
-        payload["fields"]["description"] = f"User {user} was deleted in Keeper."
+        payload["fields"]["description"] = {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": f"User {user} was deleted in Keeper."}
+                    ]
+                }
+            ]
+        }
+
     else:
         print(f"⚠️ Unknown event_type: {event_type}")
         sys.stdout.flush()
