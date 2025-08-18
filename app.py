@@ -25,7 +25,20 @@ def webhook():
     # Call Jira back - Add a comment
     url = f"{JIRA_URL}/rest/api/3/issue/{issue_key}/comment"
     auth = (JIRA_USER, JIRA_API_TOKEN)
-    payload = {"body": "Hello World from Keeper POC!"}
+    payload = {
+        "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "Hello World from Keeper POC!"}
+                    ]
+                }
+            ]
+        }
+    }
 
     response = requests.post(url, json=payload, auth=auth)
     print("👉 Jira response:", response.status_code, response.text, flush=True)
