@@ -17,31 +17,43 @@ KEEPER_URL = "https://keeper-api-poc/receive-event"
 # ------------------------
 @app.route("/webhooks", methods=["POST"])
 def jira_webhook():
-    data = request.json
-    issue_key = data.get("issue", {}).get("key")
-    triggered_by = data.get("user", {}).get("emailAddress")
+    data = request.json or {}
+    issue = data.get("issue")
+    user = data.get("user", {})
+    triggered_by = user.get("emailAddress")
 
-    print("👉 Jira event for issue:", issue_key, "by:", triggered_by)
+    if not issue:
+        print("⚠️ No issue info in payload:", data)
+        return jsonify({"status": "ignored", "reason": "no issue in payload"}), 200
 
-    # Avoid loops (don’t react to your own Jira automation account)
+    issue_key = issue.get("key")
+    fields = issue.get("fields", {})
+    summary = fields.get("summary", "N/A")
+    status = fields.get("status", {}).get("name", "N/A")
+
+    print(f"👉 Jira event for {issue_key} (summary={summary}, status={status}) by {triggered_by}")
+
+    # Avoid loops
     if triggered_by == JIRA_USER:
         print("⏩ Skipping self-triggered Jira event")
         return jsonify({"status": "skipped"}), 200
 
-    # Send event to Keeper
+    # Build Keeper payload
     keeper_payload = {
         "source": "jira",
         "issue_key": issue_key,
-        "summary": data["issue"]["fields"]["summary"],
-        "status": data["issue"]["fields"]["status"]["name"],
-        "triggered_by": triggered_by
+        "summary": summary,
+        "status": status,
+        "triggered_by": triggered_by,
     }
 
+    print("📤 Would send to Keeper:", keeper_payload)
+
     try:
-        resp = requests.post(KEEPER_URL, json=keeper_payload)
+        resp = requests.post(KEEPER_URL, json=keeper_payload, timeout=5)
         print("👉 Forwarded to Keeper:", resp.status_code, resp.text)
-    except Exception as e:
-        print("⚠️ Error sending to Keeper:", str(e))
+    except Exception:
+        print("⚠️ Keeper not available (simulated POC only)")
 
     return jsonify({"status": "ok"}), 200
 
