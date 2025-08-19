@@ -18,18 +18,36 @@ EXTERNAL_SERVICE_URL = os.getenv("EXTERNAL_SERVICE_URL", "https://jira-integrati
 # Utility: Create Jira webhook
 # =========================
 def create_jira_webhook():
-    """Programmatically create Jira webhook (requires admin API token)."""
+    """Ensure Jira webhook exists (create if missing)."""
     url = f"{JIRA_URL}/rest/webhooks/1.0/webhook"
     headers = {"Content-Type": "application/json"}
     auth = (JIRA_USER, JIRA_API_TOKEN)
 
+    # First: fetch existing webhooks
+    try:
+        resp = requests.get(url, auth=auth, headers=headers)
+        resp.raise_for_status()
+        existing_hooks = resp.json()
+    except Exception as e:
+        print("❌ Failed to fetch Jira webhooks:", e)
+        sys.stdout.flush()
+        return
+
+    webhook_url = f"{EXTERNAL_SERVICE_URL}/jira-events"
+
+    # Check if our webhook already exists
+    for hook in existing_hooks:
+        if hook.get("url") == webhook_url:
+            print(f"ℹ️ Webhook already exists, skipping creation (id={hook.get('self')})")
+            sys.stdout.flush()
+            return
+
+    # If not found → create
     payload = {
         "name": "Integration Webhook",
-        "url": f"{EXTERNAL_SERVICE_URL}/jira-events",
+        "url": webhook_url,
         "events": ["jira:issue_created", "jira:issue_updated"],
-        "filters": {
-            "issue-related-events-section": f"project = {JIRA_PROJECT_KEY}"
-        },
+        "filters": {"issue-related-events-section": f"project = {JIRA_PROJECT_KEY}"},
         "excludeBody": False
     }
 
