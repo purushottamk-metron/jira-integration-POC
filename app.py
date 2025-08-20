@@ -18,6 +18,50 @@ APPROVAL_FIELD_NAME = os.getenv("APPROVAL_FIELD_NAME", "Approval Status")
 def jira_auth():
     return (JIRA_USER, JIRA_API_TOKEN)
 
+# ========================= 
+# Utility: Create Jira webhook 
+# ========================= 
+def create_jira_webhook(): 
+    """Ensure Jira webhook exists (create if missing).""" 
+    url = f"{JIRA_URL}/rest/webhooks/1.0/webhook" 
+    headers = {"Content-Type": "application/json"} 
+    auth = jira_auth() 
+
+    try: 
+        resp = requests.get(url, auth=auth, headers=headers) 
+        resp.raise_for_status() 
+        existing_hooks = resp.json() 
+    except Exception as e: 
+        print("❌ Failed to fetch Jira webhooks:", e) 
+        sys.stdout.flush() 
+        return 
+    
+    webhook_url = f"{EXTERNAL_SERVICE_URL}/jira-events" 
+
+    for hook in existing_hooks: 
+        if hook.get("url") == webhook_url: 
+            print(f"ℹ️ Webhook already exists, skipping creation (id={hook.get('self')})") 
+            sys.stdout.flush() 
+            return 
+
+    payload = { 
+        "name": "Integration Webhook", 
+        "url": webhook_url, 
+        "events": ["jira:issue_created", "jira:issue_updated"], 
+        "filters": {"issue-related-events-section": f"project = {JIRA_PROJECT_KEY}"}, 
+        "excludeBody": False 
+    } 
+
+    try: 
+        resp = requests.post(url, json=payload, auth=auth, headers=headers) 
+        resp.raise_for_status() 
+        print("✅ Jira webhook created:", resp.json()) 
+    except requests.exceptions.HTTPError as e: 
+        print("❌ Jira webhook creation failed:", e) 
+        print("Response:", resp.text) 
+    except Exception as e: 
+        print("❌ Unexpected error creating webhook:", e) 
+    sys.stdout.flush()
 # =========================
 # Utility: Jira API helpers
 # =========================
@@ -160,4 +204,6 @@ def index():
     return "Flask integration hub for Jira <-> External Service (with approvals workflow)!"
 
 if __name__ == "__main__":
+    if os.getenv("AUTO_CREATE_WEBHOOK", "false").lower() == "true":
+        create_jira_webhook()
     app.run(host="0.0.0.0", port=5000)
