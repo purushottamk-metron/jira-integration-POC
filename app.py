@@ -257,8 +257,10 @@ def create_issue_type_with_field():
         context = safe_json(context_resp)
         print("Context response:", context); sys.stdout.flush()
 
-        # Get context ID
-        if context.get("values"):
+        # Get context ID safely
+        if "id" in context:
+            context_id = context["id"]
+        elif context.get("values"):
             context_id = context["values"][0]["id"]
         else:
             return jsonify({"error": "Failed to create field context"}), 500
