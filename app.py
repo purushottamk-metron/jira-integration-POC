@@ -164,7 +164,11 @@ def get_project_id(project_key):
     url = f"{JIRA_URL}/rest/api/3/project/{project_key}"
     resp = requests.get(url, auth=jira_auth(), headers=headers)
     resp.raise_for_status()
-    return resp.json()["id"]
+    project = resp.json()
+    # Debug log
+    print("Project response:", project)
+    return project["id"]   # this is the numeric ID we need
+
 
 
 # =========================
