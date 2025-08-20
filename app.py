@@ -261,6 +261,7 @@ def create_access_request():
                 "name": f"{name} Screen Scheme",
                 "description": f"Screen Scheme for {name}",
                 "screens": {
+                    "default": screen_id,
                     "create": screen_id,
                     "edit": screen_id,
                     "view": screen_id
