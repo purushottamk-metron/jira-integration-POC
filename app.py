@@ -226,13 +226,15 @@ def admin_create_custom_field():
 
     # Step 2: Create project-specific context
     try:
-        numeric_field_id = custom_field.get("schema", {}).get("customId")
-        if not numeric_field_id:
-            return jsonify({"error": f"Could not extract numeric fieldId from schema: {custom_field}"}), 400
+        field_key = custom_field.get("id")  # e.g. "customfield_10095"
+        if not field_key:
+            return jsonify({"error": f"Could not extract field id from response: {custom_field}"}), 400
 
-        ctx_url = f"{JIRA_URL}/rest/api/3/field/{numeric_field_id}/context"
+        ctx_url = f"{JIRA_URL}/rest/api/3/field/context"
         ctx_payload = {
             "name": f"{JIRA_PROJECT_KEY} Context",
+            "description": "Project-specific context for Approval Status field",
+            "fieldId": field_key,
             "projectIds": [project_id],
             "issueTypeIds": []  # empty = all issue types in that project
         }
