@@ -272,6 +272,7 @@ def create_issue_type_with_field():
         existing_scheme = next((s for s in existing_schemes if s["name"] == f"{name} Screen Scheme"), None)
 
         if existing_scheme:
+            screen_scheme = existing_scheme
             screen_scheme_id = existing_scheme["id"]
         else:
             screen_scheme_payload = {
