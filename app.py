@@ -11,7 +11,7 @@ app = Flask(__name__)
 JIRA_URL = os.getenv("JIRA_URL", "https://metronlabs-team.atlassian.net")
 JIRA_USER = os.getenv("JIRA_USER", "purushottam.kamble@metronlabs.com")  # e.g. email
 JIRA_API_TOKEN = os.getenv("ATLASSIAN_API_TOKEN")  # Atlassian API token
-JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "DEM")  # must exist in Jira
+JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "AV")  # must exist in Jira
 EXTERNAL_SERVICE_URL = os.getenv("EXTERNAL_SERVICE_URL", "https://jira-integration-poc.onrender.com")
 APPROVAL_FIELD_NAME = os.getenv("APPROVAL_FIELD_NAME", "Approval Status")
 
