@@ -167,6 +167,7 @@ def get_project_id(project_key):
     project = resp.json()
     # Debug log
     print("Project response:", project)
+    sys.stdout.flush()
     return project["id"]   # this is the numeric ID we need
 
 
