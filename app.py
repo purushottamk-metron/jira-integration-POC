@@ -269,16 +269,14 @@ def create_issue_type_with_field():
         screen_scheme_payload = {
             "name": f"{name} Screen Scheme",
             "description": f"Screen Scheme for {name}",
-            "defaultScreenId": screen_id,
-            "screens": {
-                "create": screen_id,
-                "edit": screen_id,
-                "view": screen_id
-            }
+            "defaultScreenId": screen_id
         }
-        screen_scheme_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=screen_scheme_payload, auth=jira_auth(), headers=headers)
+        screen_scheme_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", 
+                                        json=screen_scheme_payload, 
+                                        auth=jira_auth(), 
+                                        headers=headers)
         screen_scheme_resp.raise_for_status()
-        screen_scheme = safe_json(screen_scheme_resp)
+        screen_scheme = screen_scheme_resp.json()
         screen_scheme_id = screen_scheme["id"]
 
         # 9️⃣ Attach Screen Scheme to project's Issue Type Screen Scheme
