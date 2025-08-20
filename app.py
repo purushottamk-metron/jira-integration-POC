@@ -187,37 +187,38 @@ def create_issue_type_with_field():
     description = data.get("description", "")
 
     try:
-        # 1️⃣ Get project ID
+        # 1️⃣ Get project ID and project object
         project_id, project = get_project_id(JIRA_PROJECT_KEY)
 
-        # 2️⃣ Create/Get issue type
+        # 2️⃣ Get project's issue type scheme
+        scheme_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
+        scheme_resp = requests.get(scheme_url, auth=jira_auth(), headers=headers)
+        scheme_resp.raise_for_status()
+        scheme_data = scheme_resp.json()
+        if not scheme_data.get("values"):
+            return jsonify({"error": "No issue type scheme found for project"}), 400
+        scheme_id = scheme_data["values"][0]["issueTypeScheme"]["id"]
+
+        # 3️⃣ Create new issue type
         issue_type_url = f"{JIRA_URL}/rest/api/3/issuetype"
         issue_type_payload = {"name": name, "description": description, "type": "standard"}
         issue_type_resp = requests.post(issue_type_url, json=issue_type_payload, auth=jira_auth(), headers=headers)
-        issue_type = safe_json(issue_type_resp)
-        issue_type_id = issue_type.get("id")
-        if not issue_type_id:
-            # If already exists, get it from project issueTypes
-            for it in project.get("issueTypes", []):
-                if it["name"] == name:
-                    issue_type_id = it["id"]
-                    issue_type = it
-                    break
-            if not issue_type_id:
-                return jsonify({"error": "Failed to create or find issue type"}), 500
+        issue_type_resp.raise_for_status()
+        issue_type = issue_type_resp.json()
+        issue_type_id = issue_type["id"]
 
-        # 3️⃣ Add issue type to project's issue type scheme
-        scheme_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
-        scheme_resp = requests.get(scheme_url, auth=jira_auth(), headers=headers)
-        scheme = safe_json(scheme_resp)
-        scheme_id = scheme["values"][0]["issueTypeScheme"]["id"]
+        # 4️⃣ Add issue type to project scheme
         add_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype"
-        requests.put(add_url, json={"issueTypeIds": [issue_type_id]}, auth=jira_auth(), headers=headers)
+        add_payload = {"issueTypeIds": [issue_type_id]}
+        add_resp = requests.put(add_url, json=add_payload, auth=jira_auth(), headers=headers)
+        add_resp.raise_for_status()
 
-        # 4️⃣ Create/Get custom field
+        # 5️⃣ Create/Get custom field "Approval Status"
         fields_resp = requests.get(f"{JIRA_URL}/rest/api/3/field", auth=jira_auth(), headers=headers)
-        existing_fields = safe_json(fields_resp)
+        fields_resp.raise_for_status()
+        existing_fields = fields_resp.json()
         field = next((f for f in existing_fields if f["name"] == "Approval Status"), None)
+
         if field:
             field_id = field["id"]
         else:
@@ -227,68 +228,83 @@ def create_issue_type_with_field():
                 "type": "com.atlassian.jira.plugin.system.customfieldtypes:select"
             }
             field_resp = requests.post(f"{JIRA_URL}/rest/api/3/field", json=field_payload, auth=jira_auth(), headers=headers)
-            field = safe_json(field_resp)
-            field_id = field.get("id")
+            field_resp.raise_for_status()
+            field = field_resp.json()
+            field_id = field["id"]
 
-        # 5️⃣ Create field context + options
-        context_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
+        # 6️⃣ Create field context & options
         context_payload = {
             "name": f"{name} Context",
             "description": f"Context for {name}",
             "projectIds": [project_id],
             "issueTypeIds": [issue_type_id]
         }
-        context_resp = requests.post(context_url, json=context_payload, auth=jira_auth(), headers=headers)
-        context = safe_json(context_resp)
+        context_resp = requests.post(f"{JIRA_URL}/rest/api/3/field/{field_id}/context", json=context_payload, auth=jira_auth(), headers=headers)
+        context_resp.raise_for_status()
+        context = context_resp.json()
         context_id = context.get("id") or context.get("values", [{}])[0].get("id")
-        options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
-        requests.post(options_url, json={"options": [{"value": "Approved"}, {"value": "Rejected"}]}, auth=jira_auth(), headers=headers)
 
-        # 6️⃣ Create Admin Screen
-        screen_name = f"{name} Admin Screen"
+        options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
+        requests.post(f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option", json=options_payload, auth=jira_auth(), headers=headers)
+
+        # 7️⃣ Create Admin Screen
         screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screens", auth=jira_auth(), headers=headers)
-        screens = safe_json(screens_resp)
-        screen = next((s for s in screens.get("values", []) if s["name"] == screen_name), None)
-        if not screen:
-            create_screen_resp = requests.post(f"{JIRA_URL}/rest/api/3/screens", json={"name": screen_name, "description": f"Screen for {name} admins"}, auth=jira_auth(), headers=headers)
-            screen = safe_json(create_screen_resp)
-        screen_id = screen["id"]
-        # Add field to first tab
-        requests.post(f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields", json={"fieldId": field_id}, auth=jira_auth(), headers=headers)
+        screens_resp.raise_for_status()
+        screens_list = screens_resp.json().get("values", [])
+        admin_screen = next((s for s in screens_list if s.get("name") == f"{name} Admin Screen"), None)
 
-        # 7️⃣ Create Screen Scheme
-        screen_scheme_name = f"{name} Screen Scheme"
-        screen_schemes_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme", auth=jira_auth(), headers=headers)
-        screen_schemes = safe_json(screen_schemes_resp)
-        screen_scheme = next((s for s in screen_schemes.get("values", []) if s["name"] == screen_scheme_name), None)
-        if not screen_scheme:
-            payload = {"name": screen_scheme_name, "description": f"Screen scheme for {name}", "screens": {"create": screen_id, "edit": screen_id, "view": screen_id}}
-            create_scheme_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=payload, auth=jira_auth(), headers=headers)
-            screen_scheme = safe_json(create_scheme_resp)
-        screen_scheme_id = screen_scheme["id"]
+        if not admin_screen:
+            create_screen_payload = {"name": f"{name} Admin Screen", "description": "Screen for admin updates"}
+            create_screen_resp = requests.post(f"{JIRA_URL}/rest/api/3/screens", json=create_screen_payload, auth=jira_auth(), headers=headers)
+            create_screen_resp.raise_for_status()
+            admin_screen = create_screen_resp.json()
 
-        # 8️⃣ Create Issue Type Screen Scheme
-        its_name = f"{name} Issue Type Screen Scheme"
-        its_resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme", auth=jira_auth(), headers=headers)
-        its_list = safe_json(its_resp).get("values", [])
-        its = next((i for i in its_list if i["name"] == its_name), None)
-        if not its:
-            payload = {"name": its_name, "description": f"ITS for {name}", "issueTypeMappings": {issue_type_id: screen_scheme_id}}
-            create_its_resp = requests.post(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme", json=payload, auth=jira_auth(), headers=headers)
-            its = safe_json(create_its_resp)
-        its_id = its["id"]
+        screen_id = admin_screen["id"]
 
-        # 9️⃣ Assign Issue Type Screen Scheme to project
-        assign_url = f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}/issuescreenscheme"
-        requests.put(assign_url, json={"id": its_id}, auth=jira_auth(), headers=headers)
+        # Add field to first tab (Jira always has tab id 1 initially)
+        add_field_payload = {"fieldId": field_id}
+        requests.post(f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields", json=add_field_payload, auth=jira_auth(), headers=headers)
+
+        # 8️⃣ Attach Admin Screen to Issue Type Screen Scheme
+        its_url = f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}"
+        its_resp = requests.get(its_url, auth=jira_auth(), headers=headers)
+        its_resp.raise_for_status()
+        its_data = its_resp.json()
+        if its_data.get("values"):
+            its_scheme_id = its_data["values"][0]["issueTypeScreenScheme"]["id"]
+
+            # Jira Cloud doesn't allow PUT to /mapping. We must create a screen scheme first
+            # Create a new Screen Scheme with the admin screen
+            screen_scheme_payload = {
+                "name": f"{name} Screen Scheme",
+                "description": f"Screen Scheme for {name}",
+                "screens": {
+                    "create": screen_id,
+                    "edit": screen_id,
+                    "view": screen_id
+                }
+            }
+            screen_scheme_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=screen_scheme_payload, auth=jira_auth(), headers=headers)
+            screen_scheme_resp.raise_for_status()
+            screen_scheme = screen_scheme_resp.json()
+            screen_scheme_id = screen_scheme["id"]
+
+            # Map the issue type to new screen scheme
+            mapping_payload = {
+                "issueTypeMappings": [
+                    {
+                        "issueTypeId": issue_type_id,
+                        "screenSchemeId": screen_scheme_id
+                    }
+                ]
+            }
+            requests.post(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping", json=mapping_payload, auth=jira_auth(), headers=headers)
 
         return jsonify({
             "issue_type": issue_type,
             "custom_field": field,
             "context": context,
-            "screen": screen,
-            "screen_scheme": screen_scheme,
-            "issue_type_screen_scheme": its
+            "admin_screen": admin_screen
         })
 
     except requests.exceptions.RequestException as e:
