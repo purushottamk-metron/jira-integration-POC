@@ -187,39 +187,34 @@ def create_issue_type_with_field():
     description = data.get("description", "")
 
     try:
-        # 1. Get project ID
+        # 1️⃣ Get project ID
         project_id = get_project_id(JIRA_PROJECT_KEY)
 
-        # 2. Get project's issue type scheme
+        # 2️⃣ Get project’s issue type scheme
         scheme_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
         scheme_resp = requests.get(scheme_url, auth=jira_auth(), headers=headers)
         scheme_resp.raise_for_status()
         scheme = safe_json(scheme_resp)
-        print("Scheme response:", scheme); sys.stdout.flush()
-
         if not scheme.get("values"):
             return jsonify({"error": "No issue type scheme found for project"}), 400
-
         scheme_id = scheme["values"][0]["issueTypeScheme"]["id"]
 
-        # 3. Create issue type
+        # 3️⃣ Create/Get issue type
         issue_type_url = f"{JIRA_URL}/rest/api/3/issuetype"
         issue_type_payload = {"name": name, "description": description, "type": "standard"}
         issue_type_resp = requests.post(issue_type_url, json=issue_type_payload, auth=jira_auth(), headers=headers)
-        issue_type_resp.raise_for_status()
         issue_type = safe_json(issue_type_resp)
         issue_type_id = issue_type.get("id")
         if not issue_type_id:
             return jsonify({"error": "Failed to create issue type"}), 500
 
-        # 4. Add issue type to the project’s scheme
+        # 4️⃣ Add issue type to project scheme
         add_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype"
         add_payload = {"issueTypeIds": [issue_type_id]}
         add_resp = requests.put(add_url, json=add_payload, auth=jira_auth(), headers=headers)
         add_resp.raise_for_status()
-        print("Issue type added to scheme:", safe_json(add_resp)); sys.stdout.flush()
 
-        # 5. Check if custom field already exists
+        # 5️⃣ Create/Get custom field
         fields_resp = requests.get(f"{JIRA_URL}/rest/api/3/field", auth=jira_auth(), headers=headers)
         fields_resp.raise_for_status()
         existing_fields = safe_json(fields_resp)
@@ -227,9 +222,7 @@ def create_issue_type_with_field():
 
         if field:
             field_id = field["id"]
-            print(f"Custom field 'Approval Status' already exists with ID {field_id}")
         else:
-            # Create the custom field
             field_url = f"{JIRA_URL}/rest/api/3/field"
             field_payload = {
                 "name": "Approval Status",
@@ -242,9 +235,8 @@ def create_issue_type_with_field():
             field_id = field.get("id")
             if not field_id:
                 return jsonify({"error": "Failed to create custom field"}), 500
-            print(f"Custom field created with ID {field_id}")
 
-        # 6. Create field context (scoped to project + issue type)
+        # 6️⃣ Create field context & options
         context_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
         context_payload = {
             "name": f"{name} Context",
@@ -255,34 +247,42 @@ def create_issue_type_with_field():
         context_resp = requests.post(context_url, json=context_payload, auth=jira_auth(), headers=headers)
         context_resp.raise_for_status()
         context = safe_json(context_resp)
-        print("Context response:", context); sys.stdout.flush()
-
-        # Get context ID safely
-        if "id" in context:
-            context_id = context["id"]
-        elif context.get("values"):
-            context_id = context["values"][0]["id"]
-        else:
+        context_id = context.get("id") or context.get("values", [{}])[0].get("id")
+        if not context_id:
             return jsonify({"error": "Failed to create field context"}), 500
 
-        # 7. Add dropdown options
+        # Add dropdown options
         options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
-        options_payload = {
-            "options": [
-                {"value": "Approved"},
-                {"value": "Rejected"}
-            ]
-        }
+        options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
         options_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
         options_resp.raise_for_status()
         options = safe_json(options_resp)
-        print("Options response:", options); sys.stdout.flush()
+
+        # 7️⃣ Attach field to admin-only screen
+        # Get screens for project issue type
+        screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screens", auth=jira_auth(), headers=headers)
+        screens_resp.raise_for_status()
+        screens = safe_json(screens_resp)
+
+        # Look for a "Admin" screen or create one
+        admin_screen = next((s for s in screens if s["name"] == f"{name} Admin Screen"), None)
+        if not admin_screen:
+            create_screen_payload = {"name": f"{name} Admin Screen", "description": f"Screen for admin updates"}
+            create_screen_resp = requests.post(f"{JIRA_URL}/rest/api/3/screens", json=create_screen_payload, auth=jira_auth(), headers=headers)
+            create_screen_resp.raise_for_status()
+            admin_screen = safe_json(create_screen_resp)
+        screen_id = admin_screen["id"]
+
+        # Add field to screen
+        add_field_payload = {"fieldId": field_id}
+        requests.post(f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields", json=add_field_payload, auth=jira_auth(), headers=headers)
 
         return jsonify({
             "issue_type": issue_type,
             "custom_field": field,
             "context": context,
-            "options": options
+            "options": options,
+            "admin_screen": admin_screen
         })
 
     except requests.exceptions.RequestException as e:
