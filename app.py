@@ -180,7 +180,7 @@ def safe_json(resp):
 # =========================
 # Create Issue Type + Field + Screen + Scheme
 # =========================
-@app.route("/admin/create-access-request", methods=["POST"])
+@app.route("/admin/create-issue-type", methods=["POST"])
 def create_access_request():
     data = request.get_json()
     name = "Access Request"
@@ -254,33 +254,45 @@ def create_access_request():
         options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
         requests.post(f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option", json=options_payload, auth=jira_auth(), headers=headers)
 
-        # 7️⃣ Hide field for non-admins using existing Field Configuration
+        # 7️⃣ Hide field for non-admins only if a classic Field Configuration Scheme exists
         fc_scheme_resp = requests.get(
             f"{JIRA_URL}/rest/api/3/fieldconfigurationscheme/project?projectId={project_id}",
             auth=jira_auth(), headers=headers
         )
         fc_scheme_resp.raise_for_status()
         fc_scheme = safe_json(fc_scheme_resp)
-        fc_scheme_id = fc_scheme["values"][0]["fieldConfigurationScheme"]["id"]
 
-        fc_resp = requests.get(f"{JIRA_URL}/rest/api/3/fieldconfiguration/{fc_scheme_id}", auth=jira_auth(), headers=headers)
-        fc_resp.raise_for_status()
-        field_config_id = fc_resp.json()["id"]
+        # Find first entry with fieldConfigurationScheme
+        fc_scheme_values = fc_scheme.get("values", [])
+        fc_scheme_id = None
+        for v in fc_scheme_values:
+            if "fieldConfigurationScheme" in v:
+                fc_scheme_id = v["fieldConfigurationScheme"]["id"]
+                break
 
-        hide_payload = {"fieldId": field_id, "isHidden": True}
-        hide_resp = requests.put(
-            f"{JIRA_URL}/rest/api/3/fieldconfiguration/{field_config_id}/fields/{field_id}",
-            json=hide_payload,
-            auth=jira_auth(),
-            headers=headers
-        )
-        hide_resp.raise_for_status()
+        if fc_scheme_id:
+            fc_resp = requests.get(f"{JIRA_URL}/rest/api/3/fieldconfiguration/{fc_scheme_id}", auth=jira_auth(), headers=headers)
+            fc_resp.raise_for_status()
+            field_config_id = fc_resp.json()["id"]
+
+            hide_payload = {"fieldId": field_id, "isHidden": True}
+            hide_resp = requests.put(
+                f"{JIRA_URL}/rest/api/3/fieldconfiguration/{field_config_id}/fields/{field_id}",
+                json=hide_payload,
+                auth=jira_auth(),
+                headers=headers
+            )
+            hide_resp.raise_for_status()
+            hidden_status = True
+        else:
+            # Team-managed project or no classic field configuration scheme
+            hidden_status = False
 
         return jsonify({
             "issue_type": issue_type,
             "custom_field": field,
             "context": context,
-            "field_hidden_for_non_admins": True
+            "field_hidden_for_non_admins": hidden_status
         })
 
     except requests.exceptions.RequestException as e:
