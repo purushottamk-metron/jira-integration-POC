@@ -193,79 +193,75 @@ def admin_create_issue_type():
 # Admin: Create Custom Field and Link to Project Screens
 # =========================
 @app.route("/admin/create-custom-field", methods=["POST"])
-def create_custom_field():
+def admin_create_custom_field():
+    data = request.json or {}
+    url = f"{JIRA_URL}/rest/api/3/field"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "name": data.get("name"),
+        "description": data.get("description", "Created via integration app"),
+        "type": data.get("field_type", "com.atlassian.jira.plugin.system.customfieldtypes:select"),
+        "searcherKey": data.get("searcherKey", "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher")
+    }
     try:
-        data = request.json
-        field_name = data.get("name")
-        description = data.get("description", "")
-        field_type = data.get("field_type")
+        # Step 1: Create custom field
+        resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
+        resp.raise_for_status()
+        custom_field = resp.json()
+        field_id = custom_field["id"]
 
-        # 1️⃣ Create the custom field
-        create_field_url = f"{JIRA_URL}/rest/api/3/field"
-        payload = {
-            "name": field_name,
-            "description": description,
-            "type": field_type,
-            "searcherKey": "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher"
+        # Step 2: Get context for this field
+        ctx_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
+        ctx_resp = requests.get(ctx_url, auth=jira_auth(), headers=headers)
+        ctx_resp.raise_for_status()
+        contexts = ctx_resp.json().get("values", [])
+        if not contexts:
+            return jsonify({"error": "No context found for field", "field": custom_field}), 400
+        context_id = contexts[0]["id"]
+
+        # Step 3: Add Approved/Rejected options
+        options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
+        options_payload = {
+            "options": [
+                {"value": "Approved"},
+                {"value": "Rejected"}
+            ]
         }
+        opt_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
+        opt_resp.raise_for_status()
 
-        field_resp = requests.post(create_field_url, json=payload, auth=jira_auth())
-        print("➡️ Raw field create response (status={}):".format(field_resp.status_code))
-        print(field_resp.text)
-        sys.stdout.flush()
+        # Step 4: Link field to project screens (same as before)
+        screens_url = f"{JIRA_URL}/rest/api/3/screens"
+        screens_resp = requests.get(screens_url, auth=jira_auth(), headers=headers)
+        screens_resp.raise_for_status()
+        screens = screens_resp.json().get("values", [])
 
-        field_resp.raise_for_status()
-        field_data = field_resp.json()
+        added_screens = []
+        for screen in screens:
+            tabs_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs"
+            tabs_resp = requests.get(tabs_url, auth=jira_auth(), headers=headers)
+            tabs_resp.raise_for_status()
+            tabs = tabs_resp.json()
+            if not tabs:
+                continue
+            first_tab_id = tabs[0]["id"]
 
-        # extract field id
-        field_id = field_data.get("id")
-        if not field_id:
-            print("❌ No field id returned in response")
-            sys.stdout.flush()
-            return jsonify({
-                "error": "No field id returned",
-                "raw_field_response": field_data
-            }), 400
-
-        # 2️⃣ Lookup project ID
-        project_resp = requests.get(f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}", auth=jira_auth())
-        print("➡️ Raw project lookup response (status={}):".format(project_resp.status_code))
-        print(project_resp.text)
-        sys.stdout.flush()
-
-        project_resp.raise_for_status()
-        project_id = project_resp.json()["id"]
-
-        # 3️⃣ Create project-specific context for the field
-        context_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
-        context_payload = {
-            "name": f"{field_name} Context",
-            "description": f"Context for {field_name}",
-            "projectIds": [project_id],
-            "issueTypeIds": []
-        }
-
-        context_resp = requests.post(context_url, json=context_payload, auth=jira_auth())
-        print("➡️ Raw context create response (status={}):".format(context_resp.status_code))
-        print(context_resp.text)
-        sys.stdout.flush()
-
-        context_resp.raise_for_status()
-        context_data = context_resp.json()
+            field_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs/{first_tab_id}/fields"
+            field_payload = {"fieldId": field_id}
+            add_resp = requests.post(field_url, json=field_payload, auth=jira_auth(), headers=headers)
+            if add_resp.status_code in (200, 201):
+                added_screens.append(screen["id"])
 
         return jsonify({
-            "raw_field_response": field_data,
-            "context_response": context_data
-        })
+            "custom_field": custom_field,
+            "context": contexts[0],
+            "options": opt_resp.json(),
+            "linked_screens": added_screens
+        }), 201
 
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Jira API error: {str(e)}")
-        sys.stdout.flush()
-        return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
-        sys.stdout.flush()
-        return jsonify({"error": str(e)}), 500
+    except requests.exceptions.HTTPError as e:
+        return jsonify({"error": str(e), "response": resp.text}), resp.status_code
+
 
 # =========================
 @app.route("/")
