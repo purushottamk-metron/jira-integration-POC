@@ -265,16 +265,17 @@ def create_issue_type_with_field():
         add_field_payload = {"fieldId": field_id}
         requests.post(f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields", json=add_field_payload, auth=jira_auth(), headers=headers)
 
-        # 8️⃣ Create Screen Scheme with defaultScreenId
+        # 8️⃣ Create Screen Scheme with proper 'screens' object
         screen_scheme_payload = {
             "name": f"{name} Screen Scheme",
             "description": f"Screen Scheme for {name}",
-            "defaultScreenId": screen_id
+            "screens": {
+                "default": screen_id,
+                "edit": screen_id,
+                "view": screen_id
+            }
         }
-        screen_scheme_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", 
-                                           json=screen_scheme_payload, 
-                                           auth=jira_auth(), 
-                                           headers=headers)
+        screen_scheme_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=screen_scheme_payload, auth=jira_auth(), headers=headers)
         screen_scheme_resp.raise_for_status()
         screen_scheme = safe_json(screen_scheme_resp)
         screen_scheme_id = screen_scheme["id"]
@@ -294,12 +295,15 @@ def create_issue_type_with_field():
                     }
                 ]
             }
-            requests.post(
-                f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
-                json=mapping_payload,
-                auth=jira_auth(),
-                headers=headers
-            )
+            requests.post(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping", json=mapping_payload, auth=jira_auth(), headers=headers)
+
+        return jsonify({
+            "issue_type": issue_type,
+            "custom_field": field,
+            "context": context,
+            "admin_screen": admin_screen,
+            "screen_scheme": screen_scheme
+        })
 
     except requests.exceptions.RequestException as e:
         return jsonify({"error": str(e), "response": getattr(e.response, "text", "")}), 500
