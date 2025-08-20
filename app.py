@@ -211,14 +211,17 @@ def create_custom_field():
 
         field_resp = requests.post(create_field_url, json=payload, auth=jira_auth())
         print("➡️ Raw field create response (status={}):".format(field_resp.status_code))
-        print(field_resp.text)  # full raw body
+        print(field_resp.text)
+        sys.stdout.flush()
+
         field_resp.raise_for_status()
         field_data = field_resp.json()
 
-        # extract field id (e.g. "customfield_10097")
+        # extract field id
         field_id = field_data.get("id")
         if not field_id:
             print("❌ No field id returned in response")
+            sys.stdout.flush()
             return jsonify({
                 "error": "No field id returned",
                 "raw_field_response": field_data
@@ -228,6 +231,8 @@ def create_custom_field():
         project_resp = requests.get(f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}", auth=jira_auth())
         print("➡️ Raw project lookup response (status={}):".format(project_resp.status_code))
         print(project_resp.text)
+        sys.stdout.flush()
+
         project_resp.raise_for_status()
         project_id = project_resp.json()["id"]
 
@@ -243,6 +248,8 @@ def create_custom_field():
         context_resp = requests.post(context_url, json=context_payload, auth=jira_auth())
         print("➡️ Raw context create response (status={}):".format(context_resp.status_code))
         print(context_resp.text)
+        sys.stdout.flush()
+
         context_resp.raise_for_status()
         context_data = context_resp.json()
 
@@ -253,9 +260,11 @@ def create_custom_field():
 
     except requests.exceptions.RequestException as e:
         print(f"❌ Jira API error: {str(e)}")
+        sys.stdout.flush()
         return jsonify({"error": str(e)}), 500
     except Exception as e:
         print(f"❌ Unexpected error: {str(e)}")
+        sys.stdout.flush()
         return jsonify({"error": str(e)}), 500
 
 # =========================
