@@ -204,7 +204,7 @@ def create_access_request():
 
         issue_type_id = issue_type["id"]
 
-        # 3️⃣ Get or create custom field "Approval Status"
+        # 3️⃣ Create or get custom field "Approval Status"
         fields_resp = requests.get(f"{JIRA_URL}/rest/api/3/field", auth=jira_auth(), headers=headers)
         fields_resp.raise_for_status()
         existing_fields = safe_json(fields_resp)
@@ -222,26 +222,26 @@ def create_access_request():
 
         field_id = field["id"]
 
-        # 4️⃣ Get project screen scheme
-        scheme_resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}", auth=jira_auth(), headers=headers)
-        scheme_resp.raise_for_status()
-        schemes = safe_json(scheme_resp).get("values", [])
-        if not schemes:
-            return jsonify({"error": "No issue type screen scheme found for project"}), 400
+        # 4️⃣ Get the project’s Issue Type Screen Scheme
+        its_resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}", auth=jira_auth(), headers=headers)
+        its_resp.raise_for_status()
+        its_values = safe_json(its_resp).get("values", [])
+        if not its_values:
+            return jsonify({"error": "No Issue Type Screen Scheme found for project"}), 400
 
-        screen_scheme_id = schemes[0]["issueTypeScreenScheme"]["id"]
+        screen_scheme_id = its_values[0]["issueTypeScreenScheme"]["id"]
 
         # 5️⃣ Get screen scheme details
-        screen_scheme_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{screen_scheme_id}", auth=jira_auth(), headers=headers)
-        screen_scheme_resp.raise_for_status()
-        screens = safe_json(screen_scheme_resp).get("screens", {})
+        scheme_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{screen_scheme_id}", auth=jira_auth(), headers=headers)
+        scheme_resp.raise_for_status()
+        screens = safe_json(scheme_resp).get("screens", {})
 
-        # Use "default" screen for all operations (create/edit/view)
+        # Use the "default" screen (for create/edit/view)
         default_screen_id = screens.get("default")
         if not default_screen_id:
             return jsonify({"error": "Cannot determine default screen for Access Request"}), 400
 
-        # 6️⃣ Attach custom field to the first tab of the screen
+        # 6️⃣ Attach the custom field to the first tab
         add_field_resp = requests.post(
             f"{JIRA_URL}/rest/api/3/screens/{default_screen_id}/tabs/1/fields",
             json={"fieldId": field_id},
