@@ -265,7 +265,9 @@ def create_issue_type_with_field():
         screens = safe_json(screens_resp)
 
         # Look for a "Admin" screen or create one
-        admin_screen = next((s for s in screens if s["name"] == f"{name} Admin Screen"), None)
+        screen_list = screens.get("values", [])
+        admin_screen = next((s for s in screen_list if s["name"] == f"{name} Admin Screen"), None)
+
         if not admin_screen:
             create_screen_payload = {"name": f"{name} Admin Screen", "description": f"Screen for admin updates"}
             create_screen_resp = requests.post(f"{JIRA_URL}/rest/api/3/screens", json=create_screen_payload, auth=jira_auth(), headers=headers)
