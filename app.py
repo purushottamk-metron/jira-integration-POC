@@ -201,14 +201,17 @@ def get_issue_types_in_scheme(scheme_id):
     return [it["id"] for it in resp.json().get("issueTypes", [])]
 
 # =========================
-# Helper: Update Issue Type Scheme
+# Helper: Add Issue Type to Scheme (Correct Jira API)
 # =========================
-def update_issue_type_scheme(scheme_id, updated_issue_type_ids):
-    url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype"
-    payload = {"issueTypeIds": updated_issue_type_ids}
-    resp = requests.put(url, json=payload, auth=jira_auth(), headers=headers)
+def add_issue_type_to_scheme(scheme_id, issue_type_id):
+    url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype/add"
+    payload = {"issueTypeIds": [issue_type_id]}
+    resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
     resp.raise_for_status()
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        return {}
 
 # =========================
 # Helper: Create Custom Field
@@ -275,7 +278,6 @@ def create_issue_type_with_field():
         if issue_type:
             issue_type_id = issue_type["id"]
         else:
-            # Create new issue type
             payload = {"name": name, "description": description, "type": "standard"}
             resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
             resp.raise_for_status()
@@ -295,7 +297,6 @@ def create_issue_type_with_field():
         # -------------------------
         scheme_name = f"{project['name']} Scheme"
 
-        # Fetch all schemes
         url = f"{JIRA_URL}/rest/api/3/issuetypescheme"
         resp = requests.get(url, auth=jira_auth(), headers=headers)
         resp.raise_for_status()
@@ -308,7 +309,7 @@ def create_issue_type_with_field():
 
         if scheme:
             scheme_id = scheme["id"]
-            # Fetch existing issue types in scheme safely
+            # Fetch existing issue types in scheme
             resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype",
                                 auth=jira_auth(), headers=headers)
             resp.raise_for_status()
@@ -316,14 +317,13 @@ def create_issue_type_with_field():
                 scheme_json = resp.json()
             except ValueError:
                 scheme_json = {}
-
             existing_ids = [it["id"] for it in scheme_json.get("issueTypes", [])]
 
             if issue_type_id and issue_type_id not in existing_ids:
-                update_issue_type_scheme(scheme_id, existing_ids + [issue_type_id])
+                add_issue_type_to_scheme(scheme_id, issue_type_id)
         else:
             # Create new scheme
-            issue_type_ids = [it["id"] for it in project.get("issueTypes", []) if it.get("id")] 
+            issue_type_ids = [it["id"] for it in project.get("issueTypes", []) if it.get("id")]
             if issue_type_id:
                 issue_type_ids.append(issue_type_id)
 
