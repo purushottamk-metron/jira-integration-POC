@@ -158,7 +158,7 @@ def external_webhook():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Helper: Get project ID
+# Helper: Get Project ID
 # =========================
 def get_project_id(project_key):
     url = f"{JIRA_URL}/rest/api/3/project/{project_key}"
@@ -167,8 +167,7 @@ def get_project_id(project_key):
     project = resp.json()
     print("Project response:", project)
     sys.stdout.flush()
-    return project["id"]  # numeric project ID
-
+    return project["id"]
 
 # =========================
 # Helper: Create Issue Type
@@ -180,6 +179,36 @@ def create_issue_type(name, description=""):
     resp.raise_for_status()
     return resp.json()
 
+# =========================
+# Helper: Get Issue Type Scheme for Project
+# =========================
+def get_issue_type_scheme_id(project_id):
+    url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
+    resp = requests.get(url, auth=jira_auth(), headers=headers)
+    resp.raise_for_status()
+    schemes = resp.json().get("issueTypeSchemeProjects", [])
+    if not schemes:
+        raise Exception("No issue type scheme found for project.")
+    return schemes[0]["issueTypeScheme"]["id"]
+
+# =========================
+# Helper: Get Issue Types in Scheme
+# =========================
+def get_issue_types_in_scheme(scheme_id):
+    url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype"
+    resp = requests.get(url, auth=jira_auth(), headers=headers)
+    resp.raise_for_status()
+    return [it["id"] for it in resp.json().get("issueTypes", [])]
+
+# =========================
+# Helper: Update Issue Type Scheme
+# =========================
+def update_issue_type_scheme(scheme_id, updated_issue_type_ids):
+    url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype"
+    payload = {"issueTypeIds": updated_issue_type_ids}
+    resp = requests.put(url, json=payload, auth=jira_auth(), headers=headers)
+    resp.raise_for_status()
+    return resp.json()
 
 # =========================
 # Helper: Create Custom Field
@@ -194,7 +223,6 @@ def create_custom_field(name="Approval Status", description="Approve/Reject fiel
     resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
     resp.raise_for_status()
     return resp.json()
-
 
 # =========================
 # Helper: Create Field Context
@@ -211,7 +239,6 @@ def create_field_context(field_id, context_name, project_id, issue_type_id):
     resp.raise_for_status()
     return resp.json()
 
-
 # =========================
 # Helper: Add Dropdown Options
 # =========================
@@ -221,7 +248,6 @@ def add_dropdown_options(field_id, context_id, options_list):
     resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
     resp.raise_for_status()
     return resp.json()
-
 
 # =========================
 # API: Create Issue Type + Field
@@ -237,19 +263,27 @@ def create_issue_type_with_field():
         issue_type = create_issue_type(name, description)
         issue_type_id = issue_type["id"]
 
-        # Step 2: Create Custom Field
+        # Step 2: Get Project ID
+        project_id = get_project_id(JIRA_PROJECT_KEY)
+
+        # Step 3: Add Issue Type to Project's Issue Type Scheme
+        scheme_id = get_issue_type_scheme_id(project_id)
+        existing_issue_type_ids = get_issue_types_in_scheme(scheme_id)
+
+        if issue_type_id not in existing_issue_type_ids:
+            updated_ids = existing_issue_type_ids + [issue_type_id]
+            update_issue_type_scheme(scheme_id, updated_ids)
+
+        # Step 4: Create Custom Field
         field = create_custom_field()
         field_id = field["id"]
 
-        # Step 3: Get Project ID
-        project_id = get_project_id(JIRA_PROJECT_KEY)
-
-        # Step 4: Create Field Context (scoped to this project + issue type)
+        # Step 5: Create Field Context
         context_name = f"{name} Context"
         context = create_field_context(field_id, context_name, project_id, issue_type_id)
         context_id = context["id"]
 
-        # Step 5: Add Dropdown Options
+        # Step 6: Add Dropdown Options
         options = add_dropdown_options(field_id, context_id, ["Approved", "Rejected"])
 
         return jsonify({
@@ -260,7 +294,10 @@ def create_issue_type_with_field():
         })
 
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e), "response": getattr(e.response, "text", "")}), 500
+        return jsonify({
+            "error": str(e),
+            "response": getattr(e.response, "text", "")
+        }), 500
 
 
 # =========================
