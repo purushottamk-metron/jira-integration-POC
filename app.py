@@ -203,6 +203,7 @@ def admin_create_custom_field():
         "type": data.get("field_type", "com.atlassian.jira.plugin.system.customfieldtypes:select"),
         "searcherKey": data.get("searcherKey", "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher")
     }
+
     try:
         # Step 1: Create custom field
         resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
@@ -221,42 +222,53 @@ def admin_create_custom_field():
 
         # Step 3: Add Approved/Rejected options
         options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
-        options_payload = {
-            "options": [
-                {"value": "Approved"},
-                {"value": "Rejected"}
-            ]
-        }
+        options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
         opt_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
         opt_resp.raise_for_status()
 
-        # Step 4: Link field to project screens (same as before)
+        # Step 4: Try to link field to screens automatically
+        added_screens = []
+        skipped_screens = []
+
         screens_url = f"{JIRA_URL}/rest/api/3/screens"
         screens_resp = requests.get(screens_url, auth=jira_auth(), headers=headers)
         screens_resp.raise_for_status()
         screens = screens_resp.json().get("values", [])
 
-        added_screens = []
         for screen in screens:
-            tabs_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs"
-            tabs_resp = requests.get(tabs_url, auth=jira_auth(), headers=headers)
-            tabs_resp.raise_for_status()
-            tabs = tabs_resp.json()
-            if not tabs:
-                continue
-            first_tab_id = tabs[0]["id"]
+            try:
+                # Get first available tab for this screen
+                tabs_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs"
+                tabs_resp = requests.get(tabs_url, auth=jira_auth(), headers=headers)
+                tabs_resp.raise_for_status()
+                tabs = tabs_resp.json()
+                if not tabs:
+                    skipped_screens.append({"screen_id": screen["id"], "reason": "no tabs"})
+                    continue
 
-            field_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs/{first_tab_id}/fields"
-            field_payload = {"fieldId": field_id}
-            add_resp = requests.post(field_url, json=field_payload, auth=jira_auth(), headers=headers)
-            if add_resp.status_code in (200, 201):
-                added_screens.append(screen["id"])
+                first_tab_id = tabs[0]["id"]
+
+                # Add field to this screen/tab
+                field_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs/{first_tab_id}/fields"
+                field_payload = {"fieldId": field_id}
+                add_resp = requests.post(field_url, json=field_payload, auth=jira_auth(), headers=headers)
+
+                if add_resp.status_code in (200, 201):
+                    added_screens.append(screen["id"])
+                else:
+                    skipped_screens.append({
+                        "screen_id": screen["id"],
+                        "reason": f"HTTP {add_resp.status_code}: {add_resp.text}"
+                    })
+            except Exception as e:
+                skipped_screens.append({"screen_id": screen["id"], "reason": str(e)})
 
         return jsonify({
             "custom_field": custom_field,
             "context": contexts[0],
             "options": opt_resp.json(),
-            "linked_screens": added_screens
+            "linked_screens": added_screens,
+            "skipped_screens": skipped_screens
         }), 201
 
     except requests.exceptions.HTTPError as e:
