@@ -285,17 +285,25 @@ def create_issue_type_with_field():
         its_resp = requests.get(its_url, auth=jira_auth(), headers=headers)
         its_resp.raise_for_status()
         its_data = safe_json(its_resp)
+
         if its_data.get("values"):
             its_scheme_id = its_data["values"][0]["issueTypeScreenScheme"]["id"]
             mapping_payload = {
-                "issueTypeMappings": [
+                "mappings": [
                     {
                         "issueTypeId": issue_type_id,
                         "screenSchemeId": screen_scheme_id
                     }
                 ]
             }
-            requests.post(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping", json=mapping_payload, auth=jira_auth(), headers=headers)
+            # Use PUT to update existing mappings
+            mapping_resp = requests.put(
+                f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
+                json=mapping_payload,
+                auth=jira_auth(),
+                headers=headers
+            )
+            mapping_resp.raise_for_status()
 
         return jsonify({
             "issue_type": issue_type,
