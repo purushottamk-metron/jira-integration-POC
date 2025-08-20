@@ -230,33 +230,10 @@ def admin_create_custom_field():
         opt_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
         opt_resp.raise_for_status()
 
-        # Step 4: Link field to project screens (same as before)
-        screens_url = f"{JIRA_URL}/rest/api/3/screens"
-        screens_resp = requests.get(screens_url, auth=jira_auth(), headers=headers)
-        screens_resp.raise_for_status()
-        screens = screens_resp.json().get("values", [])
-
-        added_screens = []
-        for screen in screens:
-            tabs_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs"
-            tabs_resp = requests.get(tabs_url, auth=jira_auth(), headers=headers)
-            tabs_resp.raise_for_status()
-            tabs = tabs_resp.json()
-            if not tabs:
-                continue
-            first_tab_id = tabs[0]["id"]
-
-            field_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs/{first_tab_id}/fields"
-            field_payload = {"fieldId": field_id}
-            add_resp = requests.post(field_url, json=field_payload, auth=jira_auth(), headers=headers)
-            if add_resp.status_code in (200, 201):
-                added_screens.append(screen["id"])
-
         return jsonify({
             "custom_field": custom_field,
             "context": contexts[0],
-            "options": opt_resp.json(),
-            "linked_screens": added_screens
+            "options": opt_resp.json()
         }), 201
 
     except requests.exceptions.HTTPError as e:
