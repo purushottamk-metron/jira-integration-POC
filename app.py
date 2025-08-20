@@ -235,24 +235,19 @@ def create_access_request():
         if not its_scheme:
             return jsonify({"error": "No issueTypeScreenScheme object found"}), 400
 
-        # 6️⃣ Determine screen ID
-        # Use default screen if issueTypeMappings is missing
-        its_mappings = its_scheme.get("issueTypeMappings", [])
-        mapping = next((m for m in its_mappings if m["issueTypeId"] == issue_type_id), None)
-        if mapping:
-            screen_scheme_id = mapping["screenSchemeId"]
-            screen_scheme_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{screen_scheme_id}", auth=jira_auth(), headers=headers)
-            screen_scheme_resp.raise_for_status()
-            screen_scheme = safe_json(screen_scheme_resp)
-            screen_id = screen_scheme.get("screens", {}).get("default") or list(screen_scheme.get("screens", {}).values())[0]
-        else:
-            # fallback to default screen of the scheme
-            screen_scheme_id = its_scheme["id"]
-            screen_id = its_scheme.get("screens", {}).get("default")
-            if not screen_id:
-                return jsonify({"error": "Cannot determine default screen for Access Request"}), 400
+        its_scheme_id = its_scheme["id"]
 
-        # 7️⃣ Attach field to first tab of the screen
+        # 6️⃣ Fetch the full screen scheme to get a screen ID
+        scheme_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{its_scheme_id}", auth=jira_auth(), headers=headers)
+        scheme_resp.raise_for_status()
+        screen_scheme = safe_json(scheme_resp)
+
+        # Try to use the "default" screen first, fallback to any available
+        screen_id = screen_scheme.get("screens", {}).get("default") or next(iter(screen_scheme.get("screens", {}).values()), None)
+        if not screen_id:
+            return jsonify({"error": "Cannot determine a screen to attach the field"}), 400
+
+        # 7️⃣ Attach Approval Status field to the screen (tab 1)
         attach_resp = requests.post(
             f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields",
             json={"fieldId": field_id},
@@ -262,7 +257,7 @@ def create_access_request():
         attach_resp.raise_for_status()
 
         return jsonify({
-            "message": "Access Request issue type + Approval Status field created and attached to project screen",
+            "message": "Access Request issue type + Approval Status field attached successfully",
             "issue_type_id": issue_type_id,
             "field_id": field_id,
             "screen_id": screen_id
