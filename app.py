@@ -213,13 +213,13 @@ def create_custom_field():
         field_resp.raise_for_status()
         field_data = field_resp.json()
 
-        # print raw response
-        print("Raw field create response:", field_data)
-
         # extract field id (e.g. "customfield_10097")
         field_id = field_data.get("id")
         if not field_id:
-            return jsonify({"error": "No field id returned"}), 400
+            return jsonify({
+                "error": "No field id returned",
+                "raw_field_response": field_data
+            }), 400
 
         # 2️⃣ Lookup project ID
         project_resp = requests.get(f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}", auth=jira_auth())
@@ -240,16 +240,15 @@ def create_custom_field():
         context_data = context_resp.json()
 
         return jsonify({
-            "custom_field_raw": field_data,   # full raw response
-            "context": context_data
+            "raw_field_response": field_data,   # 👈 full raw response
+            "context_response": context_data
         })
 
     except requests.exceptions.RequestException as e:
-        print(f"Jira API error: {str(e)}")
         return jsonify({"error": str(e)}), 500
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
 
 # =========================
 @app.route("/")
