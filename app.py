@@ -208,8 +208,29 @@ def admin_create_custom_field():
         resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
         resp.raise_for_status()
         custom_field = resp.json()
+        field_id = custom_field["id"]
 
-        # Step 2: Find all screens for the project
+        # Step 2: Get context for this field
+        ctx_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
+        ctx_resp = requests.get(ctx_url, auth=jira_auth(), headers=headers)
+        ctx_resp.raise_for_status()
+        contexts = ctx_resp.json().get("values", [])
+        if not contexts:
+            return jsonify({"error": "No context found for field", "field": custom_field}), 400
+        context_id = contexts[0]["id"]
+
+        # Step 3: Add Approved/Rejected options
+        options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
+        options_payload = {
+            "options": [
+                {"value": "Approved"},
+                {"value": "Rejected"}
+            ]
+        }
+        opt_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
+        opt_resp.raise_for_status()
+
+        # Step 4: Link field to project screens (same as before)
         screens_url = f"{JIRA_URL}/rest/api/3/screens"
         screens_resp = requests.get(screens_url, auth=jira_auth(), headers=headers)
         screens_resp.raise_for_status()
@@ -217,7 +238,6 @@ def admin_create_custom_field():
 
         added_screens = []
         for screen in screens:
-            # Add field to first tab of each screen
             tabs_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs"
             tabs_resp = requests.get(tabs_url, auth=jira_auth(), headers=headers)
             tabs_resp.raise_for_status()
@@ -227,12 +247,18 @@ def admin_create_custom_field():
             first_tab_id = tabs[0]["id"]
 
             field_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs/{first_tab_id}/fields"
-            field_payload = {"fieldId": custom_field["id"]}
+            field_payload = {"fieldId": field_id}
             add_resp = requests.post(field_url, json=field_payload, auth=jira_auth(), headers=headers)
             if add_resp.status_code in (200, 201):
                 added_screens.append(screen["id"])
 
-        return jsonify({"custom_field": custom_field, "linked_screens": added_screens}), 201
+        return jsonify({
+            "custom_field": custom_field,
+            "context": contexts[0],
+            "options": opt_resp.json(),
+            "linked_screens": added_screens
+        }), 201
+
     except requests.exceptions.HTTPError as e:
         return jsonify({"error": str(e), "response": resp.text}), resp.status_code
 
