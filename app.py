@@ -193,120 +193,105 @@ def admin_create_issue_type():
 # Admin: Create Custom Field and Link to Project Screens
 # =========================
 @app.route("/admin/create-custom-field", methods=["POST"])
-def admin_create_custom_field():
-    data = request.json or {}
-    headers = {"Content-Type": "application/json"}
+def create_custom_field():
+    data = request.get_json()
+    name = data.get("name")
+    description = data.get("description", "")
+    field_type = data.get("field_type")
 
-    # Step 0: Resolve project ID
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+
     try:
-        proj_url = f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}"
-        proj_resp = requests.get(proj_url, auth=jira_auth(), headers=headers)
+        # 1️⃣ Create custom field
+        field_payload = {
+            "name": name,
+            "description": description,
+            "type": field_type,
+            "searcherKey": "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher"
+        }
+        field_resp = requests.post(
+            f"{JIRA_URL}/rest/api/3/field",
+            auth=jira_auth(),
+            headers=headers,
+            json=field_payload,
+        )
+        field_resp.raise_for_status()
+        custom_field = field_resp.json()
+        field_key = custom_field.get("id")  # e.g. "customfield_10095"
+
+        # 2️⃣ Get project ID
+        proj_resp = requests.get(
+            f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}",
+            auth=jira_auth(),
+            headers=headers,
+        )
         proj_resp.raise_for_status()
         project_id = proj_resp.json()["id"]
-    except Exception as e:
-        return jsonify({"error": f"Failed to fetch project ID for {JIRA_PROJECT_KEY}: {str(e)}"}), 400
 
-    # Step 1: Create custom field
-    field_payload = {
-        "name": data.get("name"),
-        "description": data.get("description", "Created via integration app"),
-        "type": data.get("field_type", "com.atlassian.jira.plugin.system.customfieldtypes:select"),
-        "searcherKey": data.get(
-            "searcherKey",
-            "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher"
-        )
-    }
-    try:
-        resp = requests.post(f"{JIRA_URL}/rest/api/3/field", json=field_payload, auth=jira_auth(), headers=headers)
-        resp.raise_for_status()
-        custom_field = resp.json()
-        field_id = custom_field["id"]
-    except requests.exceptions.HTTPError as e:
-        return jsonify({"error": "Failed to create custom field", "response": resp.text}), resp.status_code
-
-    # Step 2: Create project-specific context
-    try:
-        field_key = custom_field.get("id")  # e.g. "customfield_10095"
-        if not field_key:
-            return jsonify({"error": f"Could not extract field id from response: {custom_field}"}), 400
-
-        ctx_url = f"{JIRA_URL}/rest/api/3/field/context"
+        # 3️⃣ Create project-specific context
+        ctx_url = f"{JIRA_URL}/rest/api/3/field/{field_key}/context"
         ctx_payload = {
             "name": f"{JIRA_PROJECT_KEY} Context",
-            "description": "Project-specific context for Approval Status field",
-            "fieldId": field_key,
+            "description": f"Context for {name} in {JIRA_PROJECT_KEY}",
             "projectIds": [project_id],
-            "issueTypeIds": []  # empty = all issue types in that project
+            "issueTypeIds": []  # all issue types
         }
         ctx_resp = requests.post(ctx_url, json=ctx_payload, auth=jira_auth(), headers=headers)
         ctx_resp.raise_for_status()
+        ctx_data = ctx_resp.json()
+        context_id = ctx_data["values"][0]["id"]
 
-        context = ctx_resp.json()["values"][0]
-        context_id = context["id"]
-    except Exception as e:
-        return jsonify({"error": f"Failed to create project-specific context: {str(e)}"}), 400
-
-    # Step 3: Add Approved/Rejected options
-    try:
-        options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
-        options_payload = {
-            "options": [{"value": "Approved"}, {"value": "Rejected"}]
-        }
+        # 4️⃣ Add options to the field context
+        options_url = f"{JIRA_URL}/rest/api/3/field/{field_key}/context/{context_id}/option"
+        options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
         opt_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
         opt_resp.raise_for_status()
         options = opt_resp.json()
-    except Exception as e:
-        return jsonify({"error": f"Failed to add options: {str(e)}"}), 400
 
-    # Step 4: Link field to project’s screens
-    added_screens, skipped_screens = [], []
-    try:
-        # Get all screens
+        # 5️⃣ Add field to all screens of the project
         screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screens", auth=jira_auth(), headers=headers)
         screens_resp.raise_for_status()
         screens = screens_resp.json().get("values", [])
 
-        # Attach only to screens belonging to this project (by name check)
+        linked_screens = []
+        skipped_screens = []
         for screen in screens:
-            if JIRA_PROJECT_KEY not in screen["name"]:
-                continue  # skip screens from other projects
-
+            screen_id = screen["id"]
             try:
-                # Get tabs for this screen
-                tabs_resp = requests.get(f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs",
-                                         auth=jira_auth(), headers=headers)
+                # get first tab of screen
+                tabs_resp = requests.get(
+                    f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs",
+                    auth=jira_auth(),
+                    headers=headers,
+                )
                 tabs_resp.raise_for_status()
                 tabs = tabs_resp.json()
                 if not tabs:
-                    skipped_screens.append({"screen_id": screen["id"], "reason": "no tabs"})
                     continue
+                tab_id = tabs[0]["id"]
 
-                first_tab_id = tabs[0]["id"]
-
-                # Add field to this screen/tab
-                field_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs/{first_tab_id}/fields"
-                add_resp = requests.post(field_url, json={"fieldId": field_id}, auth=jira_auth(), headers=headers)
-
-                if add_resp.status_code in (200, 201):
-                    added_screens.append(screen["id"])
-                else:
-                    skipped_screens.append({
-                        "screen_id": screen["id"],
-                        "reason": f"HTTP {add_resp.status_code}: {add_resp.text}"
-                    })
+                # add field to tab
+                add_resp = requests.post(
+                    f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/{tab_id}/fields",
+                    json={"fieldId": field_key},
+                    auth=jira_auth(),
+                    headers=headers,
+                )
+                add_resp.raise_for_status()
+                linked_screens.append(screen_id)
             except Exception as e:
-                skipped_screens.append({"screen_id": screen["id"], "reason": str(e)})
-    except Exception as e:
-        skipped_screens.append({"screen_id": None, "reason": f"Failed to fetch screens: {str(e)}"})
+                skipped_screens.append({"screen_id": screen_id, "reason": str(e)})
 
-    # Final response
-    return jsonify({
-        "custom_field": custom_field,
-        "context": context,
-        "options": options,
-        "linked_screens": added_screens,
-        "skipped_screens": skipped_screens
-    }), 201
+        return jsonify({
+            "custom_field": custom_field,
+            "context": ctx_data,
+            "options": options,
+            "linked_screens": linked_screens,
+            "skipped_screens": skipped_screens,
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 # =========================
 @app.route("/")
