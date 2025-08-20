@@ -190,15 +190,6 @@ def create_issue_type_with_field():
         issue_type = issue_type_resp.json()
         issue_type_id = issue_type["id"]
 
-        # 2b. Add issue type to the project’s issue type scheme
-        scheme_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
-        scheme_resp = requests.get(scheme_url, auth=jira_auth(), headers=headers)
-        scheme_resp.raise_for_status()
-        scheme = scheme_resp.json()
-        print("Scheme response:", scheme); sys.stdout.flush()
-
-        scheme_id = scheme["values"][0]["issueTypeScheme"]["id"]
-
         # Now update scheme to include the new issue type
         add_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype"
         add_payload = {"issueTypeIds": [issue_type_id]}
@@ -220,6 +211,15 @@ def create_issue_type_with_field():
 
         # 3. Get project ID
         project_id = get_project_id(JIRA_PROJECT_KEY)
+
+        # 3b. Add issue type to the project’s issue type scheme
+        scheme_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
+        scheme_resp = requests.get(scheme_url, auth=jira_auth(), headers=headers)
+        scheme_resp.raise_for_status()
+        scheme = scheme_resp.json()
+        print("Scheme response:", scheme); sys.stdout.flush()
+
+        scheme_id = scheme["values"][0]["issueTypeScheme"]["id"]
 
         # 4. Create field context (scoped only to this project + issue type)
         context_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
