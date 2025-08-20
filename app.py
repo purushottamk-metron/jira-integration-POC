@@ -180,22 +180,50 @@ def safe_json(resp):
 # =========================
 # Create Issue Type + Field + Screen + Scheme
 # =========================
-@app.route("/admin/add-approval-field", methods=["POST"])
-def add_approval_field_to_existing_screens():
+@app.route("/admin/create-access-request", methods=["POST"])
+def create_access_request():
     try:
         # 1️⃣ Get project ID
         project_id = get_project_id(JIRA_PROJECT_KEY)
 
-        # 2️⃣ Get the Access Request issue type ID
+        # 2️⃣ Create Access Request issue type if not exists
         issue_types_resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetype", auth=jira_auth(), headers=headers)
         issue_types_resp.raise_for_status()
         issue_types = safe_json(issue_types_resp)
         access_request = next((it for it in issue_types if it["name"] == "Access Request"), None)
+
         if not access_request:
-            return jsonify({"error": "Access Request issue type not found"}), 400
+            payload = {"name": "Access Request", "description": "Workflow for approvals", "type": "standard"}
+            resp = requests.post(f"{JIRA_URL}/rest/api/3/issuetype", json=payload, auth=jira_auth(), headers=headers)
+            resp.raise_for_status()
+            access_request = safe_json(resp)
+
         issue_type_id = access_request["id"]
 
-        # 3️⃣ Get project's Issue Type Screen Scheme
+        # 3️⃣ Create Approval Status custom field if not exists
+        fields_resp = requests.get(f"{JIRA_URL}/rest/api/3/field", auth=jira_auth(), headers=headers)
+        fields_resp.raise_for_status()
+        fields = safe_json(fields_resp)
+        field = next((f for f in fields if f["name"] == "Approval Status"), None)
+
+        if not field:
+            field_payload = {
+                "name": "Approval Status",
+                "description": "Admin-only approval field",
+                "type": "com.atlassian.jira.plugin.system.customfieldtypes:select"
+            }
+            resp = requests.post(f"{JIRA_URL}/rest/api/3/field", json=field_payload, auth=jira_auth(), headers=headers)
+            resp.raise_for_status()
+            field = safe_json(resp)
+
+        field_id = field["id"]
+
+        # 4️⃣ Add field options
+        options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
+        requests.post(f"{JIRA_URL}/rest/api/3/field/{field_id}/context/0/option", json=options_payload, auth=jira_auth(), headers=headers)
+
+        # 5️⃣ Attach custom field to existing project screen
+        # Get project issue type screen scheme
         its_url = f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}"
         its_resp = requests.get(its_url, auth=jira_auth(), headers=headers)
         its_resp.raise_for_status()
@@ -205,30 +233,17 @@ def add_approval_field_to_existing_screens():
 
         its_scheme_id = its_data["values"][0]["issueTypeScreenScheme"]["id"]
         its_mappings = its_data["values"][0]["issueTypeScreenScheme"]["issueTypeMappings"]
-
-        # 4️⃣ Find the screen ID for Access Request
         mapping = next((m for m in its_mappings if m["issueTypeId"] == issue_type_id), None)
         if not mapping:
             return jsonify({"error": "No screen mapped for Access Request issue type"}), 400
-        screen_scheme_id = mapping["screenSchemeId"]
 
-        # Get actual screen IDs from the screen scheme
+        screen_scheme_id = mapping["screenSchemeId"]
         screen_scheme_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{screen_scheme_id}", auth=jira_auth(), headers=headers)
         screen_scheme_resp.raise_for_status()
         screen_scheme = safe_json(screen_scheme_resp)
-        # Use default screen or create/edit/view screens
         screen_id = screen_scheme.get("screens", {}).get("default") or list(screen_scheme.get("screens", {}).values())[0]
 
-        # 5️⃣ Get the custom field ID
-        fields_resp = requests.get(f"{JIRA_URL}/rest/api/3/field", auth=jira_auth(), headers=headers)
-        fields_resp.raise_for_status()
-        fields = safe_json(fields_resp)
-        field = next((f for f in fields if f["name"] == "Approval Status"), None)
-        if not field:
-            return jsonify({"error": "Custom field 'Approval Status' not found"}), 400
-        field_id = field["id"]
-
-        # 6️⃣ Attach field to first tab of the screen
+        # Attach field to first tab
         attach_resp = requests.post(
             f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields",
             json={"fieldId": field_id},
@@ -238,9 +253,10 @@ def add_approval_field_to_existing_screens():
         attach_resp.raise_for_status()
 
         return jsonify({
-            "message": "Approval Status field added to Access Request screens successfully",
-            "screen_id": screen_id,
-            "field_id": field_id
+            "message": "Access Request issue type + Approval Status field created and attached to project screen",
+            "issue_type_id": issue_type_id,
+            "field_id": field_id,
+            "screen_id": screen_id
         })
 
     except requests.exceptions.RequestException as e:
