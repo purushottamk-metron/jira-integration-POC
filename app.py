@@ -158,7 +158,7 @@ def external_webhook():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Admin: Create Issue Type
+# Admin: Create Issue Type and Link to Project
 # =========================
 @app.route("/admin/create-issue-type", methods=["POST"])
 def admin_create_issue_type():
@@ -171,14 +171,26 @@ def admin_create_issue_type():
         "type": data.get("type", "standard")  # "standard" or "subtask"
     }
     try:
+        # Step 1: Create issue type
         resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
         resp.raise_for_status()
-        return jsonify(resp.json()), 201
+        issue_type = resp.json()
+
+        # Step 2: Associate issue type with project
+        project_url = f"{JIRA_URL}/rest/api/3/issuetype/project"
+        project_payload = {
+            "issueTypeId": issue_type["id"],
+            "projectId": data.get("project_id") or JIRA_PROJECT_KEY
+        }
+        assoc_resp = requests.put(project_url, json=project_payload, auth=jira_auth(), headers=headers)
+        assoc_resp.raise_for_status()
+
+        return jsonify({"issue_type": issue_type, "association": assoc_resp.json()}), 201
     except requests.exceptions.HTTPError as e:
         return jsonify({"error": str(e), "response": resp.text}), resp.status_code
 
 # =========================
-# Admin: Create Custom Field
+# Admin: Create Custom Field and Link to Project Screens
 # =========================
 @app.route("/admin/create-custom-field", methods=["POST"])
 def admin_create_custom_field():
@@ -192,9 +204,35 @@ def admin_create_custom_field():
         "searcherKey": data.get("searcherKey", "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher")
     }
     try:
+        # Step 1: Create custom field
         resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
         resp.raise_for_status()
-        return jsonify(resp.json()), 201
+        custom_field = resp.json()
+
+        # Step 2: Find all screens for the project
+        screens_url = f"{JIRA_URL}/rest/api/3/screens"
+        screens_resp = requests.get(screens_url, auth=jira_auth(), headers=headers)
+        screens_resp.raise_for_status()
+        screens = screens_resp.json().get("values", [])
+
+        added_screens = []
+        for screen in screens:
+            # Add field to first tab of each screen
+            tabs_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs"
+            tabs_resp = requests.get(tabs_url, auth=jira_auth(), headers=headers)
+            tabs_resp.raise_for_status()
+            tabs = tabs_resp.json()
+            if not tabs:
+                continue
+            first_tab_id = tabs[0]["id"]
+
+            field_url = f"{JIRA_URL}/rest/api/3/screens/{screen['id']}/tabs/{first_tab_id}/fields"
+            field_payload = {"fieldId": custom_field["id"]}
+            add_resp = requests.post(field_url, json=field_payload, auth=jira_auth(), headers=headers)
+            if add_resp.status_code in (200, 201):
+                added_screens.append(screen["id"])
+
+        return jsonify({"custom_field": custom_field, "linked_screens": added_screens}), 201
     except requests.exceptions.HTTPError as e:
         return jsonify({"error": str(e), "response": resp.text}), resp.status_code
 
