@@ -261,50 +261,57 @@ def create_issue_type_with_field():
         # 7️⃣ Create Admin Screen
         screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screens", auth=jira_auth(), headers=headers)
         screens_resp.raise_for_status()
-        screens_list = safe_json(screens_resp)  # list of screen dicts
-        admin_screen = next((s for s in screens_list if s["name"] == f"{name} Admin Screen"), None)
+        screens_list = safe_json(screens_resp)
+        if isinstance(screens_list, dict) and "values" in screens_list:
+            screens_list = screens_list["values"]
+
+        admin_screen = next((s for s in screens_list if isinstance(s, dict) and s.get("name") == f"{name} Admin Screen"), None)
+
         if not admin_screen:
             create_screen_payload = {"name": f"{name} Admin Screen", "description": f"Screen for admin updates"}
             create_screen_resp = requests.post(f"{JIRA_URL}/rest/api/3/screens", json=create_screen_payload, auth=jira_auth(), headers=headers)
             create_screen_resp.raise_for_status()
             admin_screen = safe_json(create_screen_resp)
+
         screen_id = admin_screen["id"]
 
-        # Add field to screen
+        # 8️⃣ Add field to screen (first tab assumed)
         add_field_payload = {"fieldId": field_id}
         requests.post(f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields", json=add_field_payload, auth=jira_auth(), headers=headers)
 
-        # 8️⃣ Create Screen Scheme
-        screen_schemes_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme", auth=jira_auth(), headers=headers)
-        screen_schemes_resp.raise_for_status()
-        screen_schemes = safe_json(screen_schemes_resp).get("values", [])
-        scheme_name = f"{name} Screen Scheme"
-        screen_scheme = next((s for s in screen_schemes if s["name"] == scheme_name), None)
-        if not screen_scheme:
-            create_ss_payload = {
-                "name": scheme_name,
-                "description": f"Screen scheme for {name}",
-                "screens": {
-                    "default": screen_id
-                }
-            }
-            create_ss_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=create_ss_payload, auth=jira_auth(), headers=headers)
-            create_ss_resp.raise_for_status()
-            screen_scheme = safe_json(create_ss_resp)
-        screen_scheme_id = screen_scheme["id"]
+        # 9️⃣ Attach screen to issue type screen scheme
+        # Get project's issue type screen scheme
+        its_url = f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}"
+        its_resp = requests.get(its_url, auth=jira_auth(), headers=headers)
+        its_resp.raise_for_status()
+        its_data = safe_json(its_resp)
+        if its_data.get("values"):
+            its_scheme_id = its_data["values"][0]["issueTypeScreenScheme"]["id"]
 
-        # 9️⃣ Associate Screen Scheme with project
-        project_ss_url = f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}"
-        project_payload = {"issueTypeScreenScheme": {"id": screen_scheme_id}}
-        requests.put(project_ss_url, json=project_payload, auth=jira_auth(), headers=headers)
+            # Get issue type screen mappings
+            mapping_url = f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping"
+            mapping_resp = requests.get(mapping_url, auth=jira_auth(), headers=headers)
+            mapping_resp.raise_for_status()
+            mappings = safe_json(mapping_resp)
+
+            # Create mapping for new issue type -> admin screen
+            update_mapping_payload = {
+                "issueTypeMappings": [
+                    {
+                        "issueTypeId": issue_type_id,
+                        "screenSchemeId": screen_id  # Attach admin screen here
+                    }
+                ]
+            }
+            requests.put(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
+                         json=update_mapping_payload, auth=jira_auth(), headers=headers)
 
         return jsonify({
             "issue_type": issue_type,
             "custom_field": field,
             "context": context,
             "options": options,
-            "admin_screen": admin_screen,
-            "screen_scheme": screen_scheme
+            "admin_screen": admin_screen
         })
 
     except requests.exceptions.RequestException as e:
