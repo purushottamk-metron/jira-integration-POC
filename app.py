@@ -17,6 +17,7 @@ APPROVAL_FIELD_NAME = os.getenv("APPROVAL_FIELD_NAME", "Approval Status")
 
 def jira_auth():
     return (JIRA_USER, JIRA_API_TOKEN)
+headers = {"Content-Type": "application/json"} 
 
 # ========================= 
 # Utility: Create Jira webhook 
@@ -24,7 +25,6 @@ def jira_auth():
 def create_jira_webhook(): 
     """Ensure Jira webhook exists (create if missing).""" 
     url = f"{JIRA_URL}/rest/webhooks/1.0/webhook" 
-    headers = {"Content-Type": "application/json"} 
     auth = jira_auth() 
 
     try: 
@@ -158,81 +158,82 @@ def external_webhook():
     return jsonify({"status": "ok"}), 200
 
 # =========================
-# Admin: Create Issue Type + Custom Field (scoped to project + issue type)
+# Helper: Get project ID
 # =========================
 def get_project_id(project_key):
-    """Fetch numeric project ID from Jira project key"""
     url = f"{JIRA_URL}/rest/api/3/project/{project_key}"
-    resp = requests.get(url, auth=jira_auth())
+    resp = requests.get(url, auth=jira_auth(), headers=headers)
     resp.raise_for_status()
     return resp.json()["id"]
 
+
+# =========================
+# Create Issue Type + Field
+# =========================
 @app.route("/admin/create-issue-type", methods=["POST"])
-def admin_create_issue_type():
-    data = request.json or {}
-    headers = {"Content-Type": "application/json"}
+def create_issue_type_with_field():
+    data = request.get_json()
+    name = data.get("name")
+    description = data.get("description", "")
 
     try:
-        # Step 0: Auto-fetch project ID
-        project_key = data.get("project_key", JIRA_PROJECT_KEY)
-        project_id = get_project_id(project_key)
-
-        # Step 1: Create Issue Type
-        url = f"{JIRA_URL}/rest/api/3/issuetype"
-        payload = {
-            "name": data.get("name"),
-            "description": data.get("description", f"Issue type for {project_key}"),
-            "type": "standard"
-        }
-        resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
-        resp.raise_for_status()
-        issue_type = resp.json()
+        # 1. Create issue type
+        issue_type_url = f"{JIRA_URL}/rest/api/3/issuetype"
+        issue_type_payload = {"name": name, "description": description, "type": "standard"}
+        issue_type_resp = requests.post(issue_type_url, json=issue_type_payload, auth=jira_auth(), headers=headers)
+        issue_type_resp.raise_for_status()
+        issue_type = issue_type_resp.json()
         issue_type_id = issue_type["id"]
 
-        # Step 2: Create Custom Field
+        # 2. Create custom field
         field_url = f"{JIRA_URL}/rest/api/3/field"
         field_payload = {
-            "name": APPROVAL_FIELD_NAME,
-            "description": "Approve/Reject field (scoped to project + issue type)",
-            "type": "com.atlassian.jira.plugin.system.customfieldtypes:select",
-            "searcherKey": "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher"
+            "name": "Approval Status",
+            "description": "Approve/Reject field",
+            "type": "com.atlassian.jira.plugin.system.customfieldtypes:select"
         }
         field_resp = requests.post(field_url, json=field_payload, auth=jira_auth(), headers=headers)
         field_resp.raise_for_status()
-        custom_field = field_resp.json()
-        field_id = custom_field["id"]
+        field = field_resp.json()
+        field_id = field["id"]
 
-        # Step 3: Create field context (scoped to this project + new issue type)
-        ctx_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
-        ctx_payload = {
-            "name": f"{custom_field['name']} Context",
-            "description": f"Context for {project_key} project and {issue_type['name']} issue type",
+        # 3. Get project ID
+        project_id = get_project_id(JIRA_PROJECT_KEY)
+
+        # 4. Create field context (scoped only to this project + issue type)
+        context_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
+        context_payload = {
+            "name": f"{name} Context",
+            "description": f"Context for {name}",
             "projectIds": [project_id],
             "issueTypeIds": [issue_type_id]
         }
-        ctx_resp = requests.post(ctx_url, json=ctx_payload, auth=jira_auth(), headers=headers)
-        ctx_resp.raise_for_status()
-        context = ctx_resp.json()["values"][0]
+        context_resp = requests.post(context_url, json=context_payload, auth=jira_auth(), headers=headers)
+        context_resp.raise_for_status()
+        context = context_resp.json()
         context_id = context["id"]
 
-        # Step 4: Add Approved/Rejected options
+        # 5. Add dropdown options
         options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
-        options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
-        opt_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
-        opt_resp.raise_for_status()
+        options_payload = {
+            "options": [
+                {"value": "Approved"},
+                {"value": "Rejected"}
+            ]
+        }
+        options_resp = requests.post(options_url, json=options_payload, auth=jira_auth(), headers=headers)
+        options_resp.raise_for_status()
+        options = options_resp.json()
 
         return jsonify({
             "issue_type": issue_type,
-            "custom_field": custom_field,
+            "custom_field": field,
             "context": context,
-            "options": opt_resp.json()
-        }), 201
+            "options": options
+        })
 
-    except requests.exceptions.HTTPError as e:
-        return jsonify({
-            "error": str(e),
-            "response": resp.text if 'resp' in locals() else "No response"
-        }), resp.status_code if 'resp' in locals() else 500
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": str(e), "response": getattr(e.response, "text", "")}), 500
 
 
 # =========================
