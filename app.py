@@ -265,7 +265,11 @@ def create_issue_type_with_field():
         url = f"{JIRA_URL}/rest/api/3/issuetype"
         resp = requests.get(url, auth=jira_auth(), headers=headers)
         resp.raise_for_status()
-        existing_types = resp.json()
+        try:
+            existing_types = resp.json()
+        except ValueError:
+            existing_types = []
+
         issue_type = next((it for it in existing_types if it["name"].lower() == name.lower()), None)
 
         if issue_type:
@@ -275,8 +279,11 @@ def create_issue_type_with_field():
             payload = {"name": name, "description": description, "type": "standard"}
             resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
             resp.raise_for_status()
-            issue_type = resp.json()
-            issue_type_id = issue_type["id"]
+            try:
+                issue_type = resp.json()
+            except ValueError:
+                issue_type = {}
+            issue_type_id = issue_type.get("id")
 
         # -------------------------
         # Step 2: Get Project Details
@@ -287,30 +294,48 @@ def create_issue_type_with_field():
         # Step 3: Get or Create Issue Type Scheme
         # -------------------------
         scheme_name = f"{project['name']} Scheme"
+
         # Fetch all schemes
         url = f"{JIRA_URL}/rest/api/3/issuetypescheme"
         resp = requests.get(url, auth=jira_auth(), headers=headers)
         resp.raise_for_status()
-        existing_schemes = resp.json().get("values", [])
+        try:
+            existing_schemes = resp.json().get("values", [])
+        except ValueError:
+            existing_schemes = []
 
         scheme = next((s for s in existing_schemes if s["name"].lower() == scheme_name.lower()), None)
+
         if scheme:
             scheme_id = scheme["id"]
-            # Add issue type to scheme if not already present
-            existing_ids = [it["id"] for it in requests.get(
-                f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype",
-                auth=jira_auth(), headers=headers).json().get("issueTypes", [])]
-            if issue_type_id not in existing_ids:
+            # Fetch existing issue types in scheme safely
+            resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype",
+                                auth=jira_auth(), headers=headers)
+            resp.raise_for_status()
+            try:
+                scheme_json = resp.json()
+            except ValueError:
+                scheme_json = {}
+
+            existing_ids = [it["id"] for it in scheme_json.get("issueTypes", [])]
+
+            if issue_type_id and issue_type_id not in existing_ids:
                 update_issue_type_scheme(scheme_id, existing_ids + [issue_type_id])
         else:
             # Create new scheme
-            issue_type_ids = [it["id"] for it in project["issueTypes"]] + [issue_type_id]
+            issue_type_ids = [it["id"] for it in project.get("issueTypes", []) if it.get("id")] 
+            if issue_type_id:
+                issue_type_ids.append(issue_type_id)
+
             payload = {"name": scheme_name, "issueTypeIds": issue_type_ids}
             resp = requests.post(f"{JIRA_URL}/rest/api/3/issuetypescheme", json=payload,
                                  auth=jira_auth(), headers=headers)
             resp.raise_for_status()
-            scheme_json = resp.json()
-            scheme_id = scheme_json.get("id") or resp.headers.get("Location").rstrip("/").split("/")[-1]
+            try:
+                scheme_json = resp.json()
+            except ValueError:
+                scheme_json = {}
+            scheme_id = scheme_json.get("id") or resp.headers.get("Location", "").rstrip("/").split("/")[-1]
 
             # Associate scheme with project
             url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project"
@@ -322,14 +347,14 @@ def create_issue_type_with_field():
         # Step 4: Create Custom Field
         # -------------------------
         field = create_custom_field()
-        field_id = field["id"]
+        field_id = field.get("id")
 
         # -------------------------
         # Step 5: Create Field Context
         # -------------------------
         context_name = f"{name} Context"
         context = create_field_context(field_id, context_name, project_id, issue_type_id)
-        context_id = context["id"]
+        context_id = context.get("id")
 
         # -------------------------
         # Step 6: Add Dropdown Options
