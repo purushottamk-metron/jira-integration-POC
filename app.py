@@ -167,7 +167,7 @@ def get_project_id(project_key):
     project = resp.json()
     print("Project response:", project)
     sys.stdout.flush()
-    return project["id"]
+    return project["id"], project
 
 # =========================
 # Helper: Create Issue Type
@@ -259,20 +259,52 @@ def create_issue_type_with_field():
     description = data.get("description", "")
 
     try:
-        # Step 1: Create Issue Type
+        # Step 1: Create Issue Type globally
         issue_type = create_issue_type(name, description)
         issue_type_id = issue_type["id"]
 
-        # Step 2: Get Project ID
-        project_id = get_project_id(JIRA_PROJECT_KEY)
+        # Step 2: Get Project Info
+        project_id, project = get_project_id(JIRA_PROJECT_KEY)
+        project_type = project["projectTypeKey"]
+        simplified = project.get("simplified", False)
 
-        # Step 3: Add Issue Type to Project's Issue Type Scheme
-        scheme_id = get_issue_type_scheme_id(project_id)
-        existing_issue_type_ids = get_issue_types_in_scheme(scheme_id)
+        # Step 3: Handle issue type scheme for software projects
+        scheme_updated = False
+        note = ""
 
-        if issue_type_id not in existing_issue_type_ids:
-            updated_ids = existing_issue_type_ids + [issue_type_id]
-            update_issue_type_scheme(scheme_id, updated_ids)
+        if project_type == "software" and not simplified:
+            # Classic software project
+            try:
+                scheme_id = get_issue_type_scheme_id(project_id)
+                existing_ids = get_issue_types_in_scheme(scheme_id)
+                if issue_type_id not in existing_ids:
+                    updated_ids = existing_ids + [issue_type_id]
+                    update_issue_type_scheme(scheme_id, updated_ids)
+                scheme_updated = True
+                note = f"Issue type added to project scheme {scheme_id}"
+            except Exception:
+                # Scheme missing → create new scheme and associate
+                url = f"{JIRA_URL}/rest/api/3/issuetypescheme"
+                payload = {
+                    "name": f"{project['name']} Scheme",
+                    "issueTypeIds": [it["id"] for it in project["issueTypes"]] + [issue_type_id]
+                }
+                resp = requests.post(url, json=payload, auth=jira_auth(), headers=headers)
+                resp.raise_for_status()
+                new_scheme_id = resp.json()["id"]
+
+                # Associate scheme with project
+                url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project"
+                payload = {"projectId": project_id, "issueTypeSchemeId": new_scheme_id}
+                resp = requests.put(url, json=payload, auth=jira_auth(), headers=headers)
+                resp.raise_for_status()
+
+                scheme_updated = True
+                note = f"Issue type scheme created and associated with project {project_id}"
+
+        else:
+            # Business project or next-gen software
+            note = "Project is business or simplified software. Issue type exists globally but may not appear in project UI."
 
         # Step 4: Create Custom Field
         field = create_custom_field()
@@ -290,7 +322,9 @@ def create_issue_type_with_field():
             "issue_type": issue_type,
             "custom_field": field,
             "context": context,
-            "options": options
+            "options": options,
+            "scheme_updated": scheme_updated,
+            "note": note
         })
 
     except requests.exceptions.RequestException as e:
