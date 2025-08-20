@@ -190,26 +190,23 @@ def create_access_request():
         # 1️⃣ Get project ID
         project_id = get_project_id(JIRA_PROJECT_KEY)
 
-        # 2️⃣ Create or get Issue Type
+        # 2️⃣ Create/Get Issue Type
         issue_types_resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetype", auth=jira_auth(), headers=headers)
         issue_types_resp.raise_for_status()
         existing_issue_types = safe_json(issue_types_resp)
         issue_type = next((i for i in existing_issue_types if i["name"] == name), None)
-
         if not issue_type:
             payload = {"name": name, "description": description, "type": "standard"}
             resp = requests.post(f"{JIRA_URL}/rest/api/3/issuetype", json=payload, auth=jira_auth(), headers=headers)
             resp.raise_for_status()
             issue_type = safe_json(resp)
-
         issue_type_id = issue_type["id"]
 
-        # 3️⃣ Create or get custom field "Approval Status"
+        # 3️⃣ Create/Get Custom Field
         fields_resp = requests.get(f"{JIRA_URL}/rest/api/3/field", auth=jira_auth(), headers=headers)
         fields_resp.raise_for_status()
         existing_fields = safe_json(fields_resp)
         field = next((f for f in existing_fields if f["name"] == "Approval Status"), None)
-
         if not field:
             payload = {
                 "name": "Approval Status",
@@ -219,41 +216,80 @@ def create_access_request():
             resp = requests.post(f"{JIRA_URL}/rest/api/3/field", json=payload, auth=jira_auth(), headers=headers)
             resp.raise_for_status()
             field = safe_json(resp)
-
         field_id = field["id"]
 
-        # 4️⃣ Get the project’s Issue Type Screen Scheme
-        its_resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}", auth=jira_auth(), headers=headers)
-        its_resp.raise_for_status()
-        its_values = safe_json(its_resp).get("values", [])
-        if not its_values:
-            return jsonify({"error": "No Issue Type Screen Scheme found for project"}), 400
+        # 4️⃣ Create or get Admin Screen for Access Request
+        screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screens", auth=jira_auth(), headers=headers)
+        screens_resp.raise_for_status()
+        screens_list = safe_json(screens_resp).get("values", [])
+        screen = next((s for s in screens_list if s["name"] == f"{name} Admin Screen"), None)
+        if not screen:
+            payload = {"name": f"{name} Admin Screen", "description": "Screen for admin updates"}
+            resp = requests.post(f"{JIRA_URL}/rest/api/3/screens", json=payload, auth=jira_auth(), headers=headers)
+            resp.raise_for_status()
+            screen = safe_json(resp)
+        
+        screen_id = screen["id"]
 
-        screen_scheme_id = its_values[0]["issueTypeScreenScheme"]["id"]
-
-        # 5️⃣ Get screen scheme details
-        scheme_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{screen_scheme_id}", auth=jira_auth(), headers=headers)
-        scheme_resp.raise_for_status()
-        screens = safe_json(scheme_resp).get("screens", {})
-
-        # Use the "default" screen (for create/edit/view)
-        default_screen_id = screens.get("default")
-        if not default_screen_id:
-            return jsonify({"error": "Cannot determine default screen for Access Request"}), 400
-
-        # 6️⃣ Attach the custom field to the first tab
-        add_field_resp = requests.post(
-            f"{JIRA_URL}/rest/api/3/screens/{default_screen_id}/tabs/1/fields",
+        # 5️⃣ Add custom field to first tab (tab 1)
+        requests.post(
+            f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields",
             json={"fieldId": field_id},
             auth=jira_auth(),
             headers=headers
         )
-        add_field_resp.raise_for_status()
+
+        # 6️⃣ Create or get Screen Scheme for Access Request
+        screenschemes_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme", auth=jira_auth(), headers=headers)
+        screenschemes_resp.raise_for_status()
+        existing_schemes = safe_json(screenschemes_resp).get("values", [])
+        screen_scheme = next((s for s in existing_schemes if s["name"] == f"{name} Screen Scheme"), None)
+        if not screen_scheme:
+            payload = {
+                "name": f"{name} Screen Scheme",
+                "description": f"Screen scheme for {name}",
+                "screens": {
+                    "create": screen_id,
+                    "edit": screen_id,
+                    "view": screen_id
+                }
+            }
+            resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=payload, auth=jira_auth(), headers=headers)
+            resp.raise_for_status()
+            screen_scheme = safe_json(resp)
+
+        screen_scheme_id = screen_scheme["id"]
+
+        # 7️⃣ Attach Screen Scheme to project's Issue Type Screen Scheme
+        its_resp = requests.get(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}",
+                                auth=jira_auth(), headers=headers)
+        its_resp.raise_for_status()
+        its_values = safe_json(its_resp).get("values", [])
+
+        if not its_values:
+            return jsonify({"error": "No Issue Type Screen Scheme found for project"}), 400
+
+        its_scheme_id = its_values[0]["issueTypeScreenScheme"]["id"]
+
+        # Update mapping for Access Request only
+        mapping_payload = {
+            "issueTypeMappings": [
+                {"issueTypeId": issue_type_id, "screenSchemeId": screen_scheme_id}
+            ]
+        }
+        mapping_resp = requests.put(
+            f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
+            json=mapping_payload,
+            auth=jira_auth(),
+            headers=headers
+        )
+        mapping_resp.raise_for_status()
 
         return jsonify({
             "issue_type": issue_type,
             "custom_field": field,
-            "screen_id": default_screen_id
+            "screen_id": screen_id,
+            "screen_scheme": screen_scheme
         })
 
     except requests.exceptions.RequestException as e:
