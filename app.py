@@ -226,7 +226,11 @@ def admin_create_custom_field():
 
     # Step 2: Create project-specific context
     try:
-        ctx_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
+        numeric_field_id = custom_field.get("schema", {}).get("customId")
+        if not numeric_field_id:
+            return jsonify({"error": f"Could not extract numeric fieldId from schema: {custom_field}"}), 400
+
+        ctx_url = f"{JIRA_URL}/rest/api/3/field/{numeric_field_id}/context"
         ctx_payload = {
             "name": f"{JIRA_PROJECT_KEY} Context",
             "projectIds": [project_id],
@@ -234,6 +238,7 @@ def admin_create_custom_field():
         }
         ctx_resp = requests.post(ctx_url, json=ctx_payload, auth=jira_auth(), headers=headers)
         ctx_resp.raise_for_status()
+
         context = ctx_resp.json()["values"][0]
         context_id = context["id"]
     except Exception as e:
