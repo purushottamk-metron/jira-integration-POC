@@ -182,7 +182,22 @@ def create_issue_type_with_field():
     description = data.get("description", "")
 
     try:
-        # 1. Create issue type
+        # 1. Get project ID
+        project_id = get_project_id(JIRA_PROJECT_KEY)
+
+        # 2. Get project's issue type scheme
+        scheme_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
+        scheme_resp = requests.get(scheme_url, auth=jira_auth(), headers=headers)
+        scheme_resp.raise_for_status()
+        scheme = scheme_resp.json()
+        print("Scheme response:", scheme); sys.stdout.flush()
+
+        if not scheme.get("values"):
+            return jsonify({"error": "No issue type scheme found for project"}), 400
+
+        scheme_id = scheme["values"][0]["issueTypeScheme"]["id"]
+
+        # 3. Create issue type
         issue_type_url = f"{JIRA_URL}/rest/api/3/issuetype"
         issue_type_payload = {"name": name, "description": description, "type": "standard"}
         issue_type_resp = requests.post(issue_type_url, json=issue_type_payload, auth=jira_auth(), headers=headers)
@@ -190,14 +205,14 @@ def create_issue_type_with_field():
         issue_type = issue_type_resp.json()
         issue_type_id = issue_type["id"]
 
-        # Now update scheme to include the new issue type
+        # 4. Add issue type to the project’s scheme
         add_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/{scheme_id}/issuetype"
         add_payload = {"issueTypeIds": [issue_type_id]}
         add_resp = requests.put(add_url, json=add_payload, auth=jira_auth(), headers=headers)
         add_resp.raise_for_status()
         print("Issue type added to scheme:", add_resp.json()); sys.stdout.flush()
 
-        # 2. Create custom field
+        # 5. Create custom field
         field_url = f"{JIRA_URL}/rest/api/3/field"
         field_payload = {
             "name": "Approval Status",
@@ -209,19 +224,7 @@ def create_issue_type_with_field():
         field = field_resp.json()
         field_id = field["id"]
 
-        # 3. Get project ID
-        project_id = get_project_id(JIRA_PROJECT_KEY)
-
-        # 3b. Add issue type to the project’s issue type scheme
-        scheme_url = f"{JIRA_URL}/rest/api/3/issuetypescheme/project?projectId={project_id}"
-        scheme_resp = requests.get(scheme_url, auth=jira_auth(), headers=headers)
-        scheme_resp.raise_for_status()
-        scheme = scheme_resp.json()
-        print("Scheme response:", scheme); sys.stdout.flush()
-
-        scheme_id = scheme["values"][0]["issueTypeScheme"]["id"]
-
-        # 4. Create field context (scoped only to this project + issue type)
+        # 6. Create field context (scoped to project + issue type)
         context_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context"
         context_payload = {
             "name": f"{name} Context",
@@ -234,10 +237,9 @@ def create_issue_type_with_field():
         context = context_resp.json()
         print("Context response:", context); sys.stdout.flush()
 
-        # Jira returns contexts under 'values' list
         context_id = context["values"][0]["id"]
 
-        # 5. Add dropdown options
+        # 7. Add dropdown options
         options_url = f"{JIRA_URL}/rest/api/3/field/{field_id}/context/{context_id}/option"
         options_payload = {
             "options": [
