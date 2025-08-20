@@ -265,20 +265,28 @@ def create_issue_type_with_field():
         add_field_payload = {"fieldId": field_id}
         requests.post(f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields", json=add_field_payload, auth=jira_auth(), headers=headers)
 
-        # 8️⃣ Create Screen Scheme with proper 'screens' object
-        screen_scheme_payload = {
-            "name": f"{name} Screen Scheme",
-            "description": f"Screen Scheme for {name}",
-            "screens": {
-                "default": screen_id,
-                "edit": screen_id,
-                "view": screen_id
+        # 8️⃣ Create or reuse Screen Scheme
+        screenschemes_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme", auth=jira_auth(), headers=headers)
+        screenschemes_resp.raise_for_status()
+        existing_schemes = safe_json(screenschemes_resp).get("values", [])
+        existing_scheme = next((s for s in existing_schemes if s["name"] == f"{name} Screen Scheme"), None)
+
+        if existing_scheme:
+            screen_scheme_id = existing_scheme["id"]
+        else:
+            screen_scheme_payload = {
+                "name": f"{name} Screen Scheme",
+                "description": f"Screen Scheme for {name}",
+                "screens": {
+                    "default": screen_id,
+                    "edit": screen_id,
+                    "view": screen_id
+                }
             }
-        }
-        screen_scheme_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=screen_scheme_payload, auth=jira_auth(), headers=headers)
-        screen_scheme_resp.raise_for_status()
-        screen_scheme = safe_json(screen_scheme_resp)
-        screen_scheme_id = screen_scheme["id"]
+            resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=screen_scheme_payload, auth=jira_auth(), headers=headers)
+            resp.raise_for_status()
+            screen_scheme = safe_json(resp)
+            screen_scheme_id = screen_scheme["id"]
 
         # 9️⃣ Attach Screen Scheme to project's Issue Type Screen Scheme
         its_url = f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/project?projectId={project_id}"
@@ -289,7 +297,7 @@ def create_issue_type_with_field():
         if its_data.get("values"):
             its_scheme_id = its_data["values"][0]["issueTypeScreenScheme"]["id"]
             mapping_payload = {
-                "mappings": [
+                "issueTypeMappings": [
                     {
                         "issueTypeId": issue_type_id,
                         "screenSchemeId": screen_scheme_id
