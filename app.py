@@ -209,7 +209,7 @@ def create_custom_field():
             "searcherKey": "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher"
         }
 
-        field_resp = requests.post(create_field_url, json=payload, auth=AUTH)
+        field_resp = requests.post(create_field_url, json=payload, auth=jira_auth())
         field_resp.raise_for_status()
         field_data = field_resp.json()
 
@@ -222,7 +222,7 @@ def create_custom_field():
             return jsonify({"error": "No field id returned"}), 400
 
         # 2️⃣ Lookup project ID
-        project_resp = requests.get(f"{JIRA_URL}/rest/api/3/project/{PROJECT_KEY}", auth=AUTH)
+        project_resp = requests.get(f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}", auth=jira_auth())
         project_resp.raise_for_status()
         project_id = project_resp.json()["id"]
 
@@ -235,7 +235,7 @@ def create_custom_field():
             "issueTypeIds": []
         }
 
-        context_resp = requests.post(context_url, json=context_payload, auth=AUTH)
+        context_resp = requests.post(context_url, json=context_payload, auth=jira_auth())
         context_resp.raise_for_status()
         context_data = context_resp.json()
 
