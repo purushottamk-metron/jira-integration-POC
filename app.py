@@ -178,7 +178,7 @@ def safe_json(resp):
         return {}
 
 # =========================
-# Create Issue Type + Field
+# Create Issue Type + Field + Screen + Scheme
 # =========================
 @app.route("/admin/create-issue-type", methods=["POST"])
 def create_issue_type_with_field():
@@ -258,16 +258,11 @@ def create_issue_type_with_field():
         options_resp.raise_for_status()
         options = safe_json(options_resp)
 
-        # 7️⃣ Attach field to admin-only screen
-        # Get screens for project issue type
+        # 7️⃣ Create Admin Screen
         screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screens", auth=jira_auth(), headers=headers)
         screens_resp.raise_for_status()
-        screens = safe_json(screens_resp)
-
-        # Look for a "Admin" screen or create one
-        screen_list = screens.get("values", [])
-        admin_screen = next((s for s in screen_list if s["name"] == f"{name} Admin Screen"), None)
-
+        screens_list = safe_json(screens_resp)  # list of screen dicts
+        admin_screen = next((s for s in screens_list if s["name"] == f"{name} Admin Screen"), None)
         if not admin_screen:
             create_screen_payload = {"name": f"{name} Admin Screen", "description": f"Screen for admin updates"}
             create_screen_resp = requests.post(f"{JIRA_URL}/rest/api/3/screens", json=create_screen_payload, auth=jira_auth(), headers=headers)
@@ -279,12 +274,37 @@ def create_issue_type_with_field():
         add_field_payload = {"fieldId": field_id}
         requests.post(f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/1/fields", json=add_field_payload, auth=jira_auth(), headers=headers)
 
+        # 8️⃣ Create Screen Scheme
+        screen_schemes_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme", auth=jira_auth(), headers=headers)
+        screen_schemes_resp.raise_for_status()
+        screen_schemes = safe_json(screen_schemes_resp).get("values", [])
+        scheme_name = f"{name} Screen Scheme"
+        screen_scheme = next((s for s in screen_schemes if s["name"] == scheme_name), None)
+        if not screen_scheme:
+            create_ss_payload = {
+                "name": scheme_name,
+                "description": f"Screen scheme for {name}",
+                "screens": {
+                    "default": screen_id
+                }
+            }
+            create_ss_resp = requests.post(f"{JIRA_URL}/rest/api/3/screenscheme", json=create_ss_payload, auth=jira_auth(), headers=headers)
+            create_ss_resp.raise_for_status()
+            screen_scheme = safe_json(create_ss_resp)
+        screen_scheme_id = screen_scheme["id"]
+
+        # 9️⃣ Associate Screen Scheme with project
+        project_ss_url = f"{JIRA_URL}/rest/api/3/project/{JIRA_PROJECT_KEY}"
+        project_payload = {"issueTypeScreenScheme": {"id": screen_scheme_id}}
+        requests.put(project_ss_url, json=project_payload, auth=jira_auth(), headers=headers)
+
         return jsonify({
             "issue_type": issue_type,
             "custom_field": field,
             "context": context,
             "options": options,
-            "admin_screen": admin_screen
+            "admin_screen": admin_screen,
+            "screen_scheme": screen_scheme
         })
 
     except requests.exceptions.RequestException as e:
