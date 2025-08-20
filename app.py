@@ -165,10 +165,7 @@ def get_project_id(project_key):
     resp = requests.get(url, auth=jira_auth(), headers=headers)
     resp.raise_for_status()
     project = resp.json()
-    # Debug log
-    print("Project response:", project)
-    sys.stdout.flush()
-    return project["id"]   # this is the numeric ID we need
+    return project["id"], project
 
 def safe_json(resp):
     """Safely parse JSON from a response, return empty dict if no content."""
