@@ -256,33 +256,39 @@ def create_access_request():
                                 auth=jira_auth(), headers=headers)
         its_resp.raise_for_status()
         its_values = safe_json(its_resp).get("values", [])
+
         if not its_values:
             return jsonify({"error": "No Issue Type Screen Scheme found for project"}), 400
 
         its_scheme_id = its_values[0]["issueTypeScreenScheme"]["id"]
         existing_mappings = its_values[0]["issueTypeScreenScheme"].get("issueTypeMappings", [])
 
-        # 5️⃣ Get screen scheme details for this issue type
+        # 5️⃣ Map new issue type to a screen scheme if not already mapped
         screen_scheme_id = None
         for mapping in existing_mappings:
             if mapping["issueTypeId"] == issue_type_id:
                 screen_scheme_id = mapping["screenSchemeId"]
                 break
 
-        # If no existing mapping, use the default
         if not screen_scheme_id:
-            screen_scheme_id = existing_mappings[0]["screenSchemeId"] if existing_mappings else None
-            if not screen_scheme_id:
-                return jsonify({"error": "Cannot determine screen scheme for Access Request"}), 400
-            existing_mappings.append({"issueTypeId": issue_type_id, "screenSchemeId": screen_scheme_id})
+            # Reuse first mapping's screen scheme or project default
+            default_screen_scheme_id = existing_mappings[0]["screenSchemeId"] if existing_mappings else None
+            if not default_screen_scheme_id:
+                return jsonify({"error": "Cannot determine default screen scheme for Access Request"}), 400
 
-        # 6️⃣ PUT updated mappings back
-        mapping_payload = {"issueTypeMappings": existing_mappings}
-        mapping_resp = requests.put(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
-                                    json=mapping_payload, auth=jira_auth(), headers=headers)
-        mapping_resp.raise_for_status()
+            existing_mappings.append({
+                "issueTypeId": issue_type_id,
+                "screenSchemeId": default_screen_scheme_id
+            })
+            screen_scheme_id = default_screen_scheme_id
 
-        # 7️⃣ Attach custom field to all screens in this screen scheme
+            # Update mappings
+            mapping_payload = {"issueTypeMappings": existing_mappings}
+            mapping_resp = requests.put(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
+                                        json=mapping_payload, auth=jira_auth(), headers=headers)
+            mapping_resp.raise_for_status()
+
+        # 6️⃣ Attach custom field to all screens in this screen scheme
         screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{screen_scheme_id}/screens",
                                     auth=jira_auth(), headers=headers)
         screens_resp.raise_for_status()
