@@ -178,7 +178,31 @@ def safe_json(resp):
         return {}
 
 # =========================
-# Create Issue Type + Field + Screen + Scheme
+# Helper: Add custom field to a screen tab
+# =========================
+def add_field_to_screen(screen_id, field_id):
+    """Add a custom field to the first tab of a Jira screen."""
+    # Get tabs for the screen
+    url = f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs"
+    resp = requests.get(url, auth=jira_auth(), headers=headers)
+    resp.raise_for_status()
+    tabs = resp.json()
+    
+    if not tabs:
+        raise Exception(f"No tabs found for screen {screen_id}")
+    
+    tab_id = tabs[0]["id"]  # Usually first tab is enough
+
+    # Add custom field to the tab
+    add_field_url = f"{JIRA_URL}/rest/api/3/screens/{screen_id}/tabs/{tab_id}/fields"
+    payload = {"fieldId": field_id}
+    resp = requests.post(add_field_url, json=payload, auth=jira_auth(), headers=headers)
+    resp.raise_for_status()
+    print(f"✅ Added field {field_id} to screen {screen_id}, tab {tab_id}")
+    return resp.json()
+
+# =========================
+# Updated /admin/create-access-request route
 # =========================
 @app.route("/admin/create-access-request", methods=["POST"])
 def create_access_request():
@@ -220,6 +244,11 @@ def create_access_request():
             resp.raise_for_status()
             field = safe_json(resp)
 
+            # Add Approved/Rejected options
+            options_payload = {"options": [{"value": "Approved"}, {"value": "Rejected"}]}
+            requests.post(f"{JIRA_URL}/rest/api/3/field/{field['id']}/option",
+                          json=options_payload, auth=jira_auth(), headers=headers)
+
         field_id = field["id"]
 
         # 4️⃣ Get the project’s Issue Type Screen Scheme
@@ -233,16 +262,15 @@ def create_access_request():
         its_scheme_id = its_values[0]["issueTypeScreenScheme"]["id"]
         existing_mappings = its_values[0]["issueTypeScreenScheme"].get("issueTypeMappings", [])
 
-        # 5️⃣ Get screen scheme details
+        # 5️⃣ Get screen scheme details for this issue type
         screen_scheme_id = None
         for mapping in existing_mappings:
             if mapping["issueTypeId"] == issue_type_id:
                 screen_scheme_id = mapping["screenSchemeId"]
                 break
 
-        # If no existing mapping, use the default screen scheme
+        # If no existing mapping, use the default
         if not screen_scheme_id:
-            # Use first mapping’s screen scheme as default
             screen_scheme_id = existing_mappings[0]["screenSchemeId"] if existing_mappings else None
             if not screen_scheme_id:
                 return jsonify({"error": "Cannot determine screen scheme for Access Request"}), 400
@@ -250,13 +278,18 @@ def create_access_request():
 
         # 6️⃣ PUT updated mappings back
         mapping_payload = {"issueTypeMappings": existing_mappings}
-        mapping_resp = requests.put(
-            f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
-            json=mapping_payload,
-            auth=jira_auth(),
-            headers=headers
-        )
+        mapping_resp = requests.put(f"{JIRA_URL}/rest/api/3/issuetypescreenscheme/{its_scheme_id}/mapping",
+                                    json=mapping_payload, auth=jira_auth(), headers=headers)
         mapping_resp.raise_for_status()
+
+        # 7️⃣ Attach custom field to all screens in this screen scheme
+        screens_resp = requests.get(f"{JIRA_URL}/rest/api/3/screenscheme/{screen_scheme_id}/screens",
+                                    auth=jira_auth(), headers=headers)
+        screens_resp.raise_for_status()
+        screens = screens_resp.json()
+        for screen_type, screen in screens.items():
+            if screen and "id" in screen:
+                add_field_to_screen(screen["id"], field_id)
 
         return jsonify({
             "issue_type": issue_type,
